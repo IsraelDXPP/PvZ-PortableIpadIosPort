@@ -282,13 +282,11 @@ LawnApp::~LawnApp()
 
 	if (mEffectSystem)
 	{
-		mEffectSystem->EffectSystemDispose();
 		delete mEffectSystem;
 	}
 
 	if (mReanimatorCache)
 	{
-		mReanimatorCache->ReanimatorCacheDispose();
 		delete mReanimatorCache;
 	}
 
