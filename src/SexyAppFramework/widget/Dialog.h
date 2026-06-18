@@ -41,8 +41,6 @@ extern std::string DIALOG_NO_STRING;
 extern std::string DIALOG_OK_STRING;
 extern std::string DIALOG_CANCEL_STRING;
 
-typedef std::vector<std::string> StringVector;
-
 class Dialog : public Widget, public ButtonListener
 {
 public:

@@ -59,10 +59,10 @@ class FontLayer
 {
 public:	
 	FontData*				mFontData;
-	StringStringMap			mExtendedInfo;
+	std::map<std::string, std::string>	mExtendedInfo;
 	std::string				mLayerName;
-	StringVector			mRequiredTags;
-	StringVector			mExcludedTags;	
+	std::vector<std::string>	mRequiredTags;
+	std::vector<std::string>	mExcludedTags;
 	//CharData				mCharData[256];	
 	CharDataMap				mCharDataMap;
 	Color					mColorMult;
@@ -165,7 +165,7 @@ class ImageFont : public _Font
 public:	
 	FontData*				mFontData;
 	int						mPointSize;
-	StringVector			mTagVector;
+	std::vector<std::string>	mTagVector;
 
 	bool					mActiveListValid;
 	ActiveFontLayerList		mActiveLayerList;

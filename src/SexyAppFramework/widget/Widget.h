@@ -37,8 +37,6 @@ namespace Sexy
 
 class WidgetManager;
 
-typedef std::vector<Color> ColorVector;
-
 class Widget : public WidgetContainer
 {
 public:			
@@ -49,7 +47,7 @@ public:
 	bool					mIsDown;
 	bool					mIsOver;
 	bool					mHasTransparencies;	
-	ColorVector				mColors;
+	std::vector<Color>		mColors;
 	Insets					mMouseInsets;
 	bool					mDoFinger;
 	bool					mWantsFocus;

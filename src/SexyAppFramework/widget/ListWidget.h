@@ -31,9 +31,6 @@
 namespace Sexy 
 {
 
-typedef std::vector<std::string> SexyStringVector;
-typedef std::vector<Color> ColorVector;
-
 class ScrollbarWidget;
 class ListListener;
 class _Font;
@@ -64,8 +61,8 @@ public:
 	ScrollbarWidget*			mScrollbar;
 	int							mJustify;
 
-	SexyStringVector			mLines;
-	ColorVector					mLineColors;
+	std::vector<std::string>	mLines;
+	std::vector<Color>			mLineColors;
 	double						mPosition;	
 	double						mPageSize;
 	int							mHiliteIdx;

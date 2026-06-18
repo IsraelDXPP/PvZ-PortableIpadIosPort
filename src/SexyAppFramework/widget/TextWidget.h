@@ -34,18 +34,15 @@ namespace Sexy
 class ScrollbarWidget;
 class _Font;
 
-typedef std::vector<std::string> SexyStringVector;
-typedef std::vector<int> IntVector;
-
 class TextWidget : public Widget, public ScrollListener
 {
 public:
 	_Font*				mFont;
 	ScrollbarWidget*	mScrollbar;
 	
-	SexyStringVector	mLogicalLines;
-	SexyStringVector	mPhysicalLines;
-	IntVector			mLineMap;
+	std::vector<std::string>	mLogicalLines;
+	std::vector<std::string>	mPhysicalLines;
+	std::vector<int>	mLineMap;
 	double				mPosition;
 	double				mPageSize;
 	bool				mStickToBottom;
@@ -55,8 +52,8 @@ public:
 public:
 	TextWidget();
 
-	virtual SexyStringVector GetLines();
-	virtual void SetLines(SexyStringVector theNewLines);
+	virtual std::vector<std::string> GetLines();
+	virtual void SetLines(std::vector<std::string> theNewLines);
 	virtual void Clear();
 	virtual void DrawColorString(Graphics* g, const std::string& theString, int x, int y, bool useColors);
 	virtual void DrawColorStringHilited(Graphics* g, const std::string& theString, int x, int y, int theStartPos, int theEndPos);

@@ -40,12 +40,12 @@ TextWidget::TextWidget()
 	mScrollbar = nullptr;
 }
 
-SexyStringVector TextWidget::GetLines()
+std::vector<std::string> TextWidget::GetLines()
 {
 	return mLogicalLines;
 }
 
-void TextWidget::SetLines(SexyStringVector theNewLines)
+void TextWidget::SetLines(std::vector<std::string> theNewLines)
 {
 	mLogicalLines = theNewLines;
 }

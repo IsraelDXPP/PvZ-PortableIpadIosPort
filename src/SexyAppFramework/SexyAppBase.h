@@ -74,15 +74,12 @@ typedef std::set<MemoryImage*> MemoryImageSet;
 typedef std::map<int, Dialog*> DialogMap;
 typedef std::list<Dialog*> DialogList;
 //typedef std::list<MSG> WindowsMessageList;
-typedef std::vector<std::string> StringVector;
 //typedef std::basic_string<TCHAR> tstring; // string of TCHARs
 
-typedef std::map<std::string, std::string> StringSexyStringMap;
-typedef std::map<std::string, std::string> StringStringMap;
 typedef std::map<std::string, bool> StringBoolMap;
 typedef std::map<std::string, int> StringIntMap;
 typedef std::map<std::string, double> StringDoubleMap;
-typedef std::map<std::string, StringVector> StringStringVectorMap;
+typedef std::map<std::string, std::vector<std::string>> StringStringVectorMap;
 
 enum
 {
@@ -343,7 +340,7 @@ public:
 	bool					mEnableWindowAspect;
 	Ratio					mWindowAspect;
 
-	StringSexyStringMap		mStringProperties;
+	std::map<std::string, std::string>	mStringProperties;
 	StringBoolMap			mBoolProperties;
 	StringIntMap			mIntProperties;
 	StringDoubleMap			mDoubleProperties;
@@ -543,7 +540,7 @@ public:
 	std::string				GetString(const std::string& theId);
 	std::string				GetString(const std::string& theId, const std::string& theDefault);
 
-	StringVector			GetStringVector(const std::string& theId);
+	std::vector<std::string>	GetStringVector(const std::string& theId);
 
 	void					SetBoolean(const std::string& theId, bool theValue);
 	void					SetInteger(const std::string& theId, int theValue);
@@ -566,7 +563,7 @@ public:
 	
 
 	// Registry access methods
-	//bool					RegistryGetSubKeys(const std::string& theKeyName, StringVector* theSubKeys);
+	//bool					RegistryGetSubKeys(const std::string& theKeyName, std::vector<std::string>* theSubKeys);
 	bool					RegistryReadString(const std::string& theValueName, std::string* theString);
 	bool					RegistryReadInteger(const std::string& theValueName, int* theValue);
 	bool					RegistryReadBoolean(const std::string& theValueName, bool* theValue);

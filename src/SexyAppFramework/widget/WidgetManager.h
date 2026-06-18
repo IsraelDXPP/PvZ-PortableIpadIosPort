@@ -38,8 +38,6 @@ class MemoryImage;
 class SexyAppBase;
 class Graphics;
 
-typedef std::list<Widget*> WidgetList;
-
 enum
 {
 	WIDGETFLAGS_UPDATE			= 1,

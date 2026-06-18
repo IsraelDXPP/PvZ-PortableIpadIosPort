@@ -28,6 +28,7 @@
 #include "Common.h"
 #include "graphics/Image.h"
 #include "SexyAppBase.h"
+#include "XMLParser.h"
 #include <string>
 #include <map>
 
@@ -45,9 +46,6 @@ class Image;
 class SoundInstance;
 class SexyAppBase;
 class _Font;
-
-typedef std::map<std::string, std::string>	StringToStringMap;
-typedef std::map<std::string, std::string>	XMLParamMap;
 
 ///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////

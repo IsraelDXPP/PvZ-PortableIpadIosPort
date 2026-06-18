@@ -127,8 +127,8 @@ void ListWidget::Sort(bool ascending)
 
 	while (aListWidget != nullptr) 
 	{
-		SexyStringVector aNewLines;
-		ColorVector aNewLineColors;
+		std::vector<std::string> aNewLines;
+		std::vector<Color> aNewLineColors;
 			
 		for (int i = 0; i < aCount; i++)
 		{

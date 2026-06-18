@@ -48,14 +48,14 @@ static void SaveToFile()
 {
 	if (currFile.empty())
 	{
-		printf("RegEmu: Filename not specified, can't save\n");
+		Sexy::PrintF("RegEmu: Filename not specified, can't save\n");
 		return;
 	}
 
 	std::ofstream f(Sexy::PathFromU8(currFile), std::ios::binary);
 	if (!f)
 	{
-		printf("RegEmu: Couldn't open '%s' for writing\n", currFile.c_str());
+		Sexy::PrintF("RegEmu: Couldn't open '%s' for writing\n", currFile.c_str());
 		return;
 	}
 
@@ -98,14 +98,14 @@ void regemu::SetRegFile(const std::string& fileName)
 	std::ifstream f(Sexy::PathFromU8(currFile), std::ios::binary);
 	if (!f)
 	{
-		printf("RegEmu: Can't read '%s': File does not exist\n", currFile.c_str());
+		Sexy::PrintF("RegEmu: Can't read '%s': File does not exist\n", currFile.c_str());
 		return;
 	}
 
 	char aHeader[6];
 	if (!f.read(aHeader, 6) || strncmp(aHeader, "REGEMU", 6))
 	{
-		printf("RegEmu: Can't read '%s': Invalid header\n", currFile.c_str());
+		Sexy::PrintF("RegEmu: Can't read '%s': Invalid header\n", currFile.c_str());
 		return;
 	}
 
@@ -152,19 +152,19 @@ void regemu::SetRegFile(const std::string& fileName)
 		delete[] aKeyName;
 	}
 
-	printf("RegEmu: Loaded from '%s': %zu total key(s)\n", currFile.c_str(), static_cast<size_t>(registry.size()));
+	Sexy::PrintF("RegEmu: Loaded from '%s': %zu total key(s)\n", currFile.c_str(), static_cast<size_t>(registry.size()));
 }
 
 bool regemu::RegistryRead(const std::string& keyName, const std::string& valueName, uint32_t* type, uint8_t* value, uint32_t* length)
 {
 	if (!registry.count(keyName))
 	{
-		printf("RegEmu: Key '%s' does not exist\n", keyName.c_str());
+		Sexy::PrintF("RegEmu: Key '%s' does not exist\n", keyName.c_str());
 		return false;
 	}
 	if (!registry[keyName].count(valueName))
 	{
-		printf("RegEmu: Value '%s' does not exist\n", valueName.c_str());
+		Sexy::PrintF("RegEmu: Value '%s' does not exist\n", valueName.c_str());
 		return false;
 	}
 
@@ -203,7 +203,7 @@ bool regemu::RegistryEraseKey(const std::string& keyName)
 		delete[] valuePair.second.mValue;
 
 	registry.erase(keyName);
-	printf("RegEmu: Erased key '%s'\n", keyName.c_str());
+	Sexy::PrintF("RegEmu: Erased key '%s'\n", keyName.c_str());
 
 	SaveToFile();
 
@@ -217,7 +217,7 @@ bool regemu::RegistryEraseValue(const std::string& keyName, const std::string& v
 
 	delete[] registry[keyName][valueName].mValue;
 	registry[keyName].erase(valueName);
-	printf("RegEmu: Erased value '%s' from key '%s'\n", valueName.c_str(), keyName.c_str());
+	Sexy::PrintF("RegEmu: Erased value '%s' from key '%s'\n", valueName.c_str(), keyName.c_str());
 
 	SaveToFile();
 

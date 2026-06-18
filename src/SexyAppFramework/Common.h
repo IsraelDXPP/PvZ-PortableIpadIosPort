@@ -124,7 +124,6 @@ const ulong SEXY_RAND_MAX = 0x7FFFFFFF;
 
 extern bool			gDebug;
 
-#define printf(...) Sexy::PrintF(__VA_ARGS__)
 void				PrintF(const char *text, ...);
 
 int					Rand();

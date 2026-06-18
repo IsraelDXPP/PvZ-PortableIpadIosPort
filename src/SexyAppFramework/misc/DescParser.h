@@ -73,8 +73,6 @@ public:
 };
 
 typedef std::map<std::string, DataElement*> DataElementMap;
-typedef std::vector<std::string> StringVector;
-typedef std::vector<int> IntVector;
 typedef std::vector<double> DoubleVector;
 
 class DescParser
@@ -103,9 +101,9 @@ public:
 	std::string				DataElementToString(DataElement* theDataElement);
 	bool					DataToString(DataElement* theSource, std::string* theString);
 	bool					DataToInt(DataElement* theSource, int* theInt);
-	bool					DataToStringVector(DataElement* theSource, StringVector* theStringVector);
+	bool					DataToStringVector(DataElement* theSource, std::vector<std::string>* theStringVector);
 	bool					DataToList(DataElement* theSource, ListDataElement* theValues);
-	bool					DataToIntVector(DataElement* theSource, IntVector* theIntVector);
+	bool					DataToIntVector(DataElement* theSource, std::vector<int>* theIntVector);
 	bool					DataToDoubleVector(DataElement* theSource, DoubleVector* theDoubleVector);
 	bool					ParseToList(const std::string& theString, ListDataElement* theList, bool expectListEnd, int* theStringPos);
 	bool					ParseDescriptorLine(const std::string& theDescriptorLine);
