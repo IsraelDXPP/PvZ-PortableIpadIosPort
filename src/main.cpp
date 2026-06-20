@@ -43,6 +43,7 @@ extern "C" {
 #ifdef __IPHONEOS__
 #include <SDL.h>
 #include <fstream>
+extern "C" void install_ios_exception_handler();
 #endif
 
 #ifdef __EMSCRIPTEN__
@@ -107,6 +108,7 @@ int main(int argc, char** argv)
 #endif
 
 #ifdef __IPHONEOS__
+	install_ios_exception_handler();
 	bool aHasGameResources = false;
 	fs::path aDocsPath;
 	const char* aHome = std::getenv("HOME");
