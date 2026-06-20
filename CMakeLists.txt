@@ -50,6 +50,7 @@ file(GLOB SOURCES CONFIGURE_DEPENDS
 list(REMOVE_ITEM SOURCES
 	${CMAKE_CURRENT_SOURCE_DIR}/src/Sexy.TodLib/TodDrawTriangle.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/src/Sexy.TodLib/TodDrawTriangleInc.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/src/ios_cxx_polyfills.cpp
 )
 
 set(LOW_MEMORY OFF CACHE BOOL "Enable low memory mode")
