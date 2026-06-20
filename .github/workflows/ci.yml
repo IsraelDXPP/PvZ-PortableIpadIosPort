@@ -545,6 +545,9 @@ jobs:
           --output-partial-info-plist /tmp/actool-partial.plist \
           ios/Assets.xcassets || echo "actool warning (non-fatal)"
 
+        # Fallback raw icon for iOS 9
+        cp ios/Assets.xcassets/AppIcon.appiconset/AppIcon.png "$APP_PATH/Icon.png" || true
+
         # Compile LaunchScreen.storyboard -> LaunchScreen.storyboardc
         echo "Compiling launch screen storyboard..."
         rm -f "$APP_PATH/LaunchScreen.storyboard"
