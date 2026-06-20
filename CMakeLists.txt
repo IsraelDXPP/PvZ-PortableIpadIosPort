@@ -346,8 +346,11 @@ elseif (IOS)
 	)
 
 	if(IOS_IPADMINI1)
-		target_link_options(pvz-portable PRIVATE "-F${CMAKE_CURRENT_SOURCE_DIR}/dummy_frameworks" "-lobjc")
-		target_sources(pvz-portable PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/ios_polyfills.c")
+		target_link_options(pvz-portable PRIVATE "-F${CMAKE_CURRENT_SOURCE_DIR}/dummy_frameworks" "-lobjc" "-Wl,-U,___gxx_personality_sj0")
+		target_sources(pvz-portable PRIVATE
+			"${CMAKE_CURRENT_SOURCE_DIR}/src/ios_polyfills.c"
+			"${CMAKE_CURRENT_SOURCE_DIR}/src/ios_cxx_polyfills.cpp"
+		)
 	endif()
 
 	set_target_properties(pvz-portable PROPERTIES
