@@ -1096,7 +1096,12 @@ SharedImageRef ResourceManager::GetImageThrow(const std::string &theId)
 
 
 	Fail(StrFormat("Image resource not found: %s",theId.c_str()));
+#ifdef IOS
+	if (gSexyAppBase) gSexyAppBase->Popup(GetErrorText());
+	exit(1);
+#else
 	throw ResourceManagerException(GetErrorText());
+#endif
 }
 
 intptr_t	ResourceManager::GetSoundThrow(const std::string &theId)
@@ -1114,7 +1119,12 @@ intptr_t	ResourceManager::GetSoundThrow(const std::string &theId)
 
 
 	Fail(StrFormat("Sound resource not found: %s",theId.c_str()));
+#ifdef IOS
+	if (gSexyAppBase) gSexyAppBase->Popup(GetErrorText());
+	exit(1);
+#else
 	throw ResourceManagerException(GetErrorText());		
+#endif
 }
 
 _Font* ResourceManager::GetFontThrow(const std::string &theId)
@@ -1131,7 +1141,12 @@ _Font* ResourceManager::GetFontThrow(const std::string &theId)
 	}
 
 	Fail(StrFormat("Font resource not found: %s",theId.c_str()));
+#ifdef IOS
+	if (gSexyAppBase) gSexyAppBase->Popup(GetErrorText());
+	exit(1);
+#else
 	throw ResourceManagerException(GetErrorText());
+#endif
 }
 
 void ResourceManager::SetAllowMissingProgramImages(bool allow)
