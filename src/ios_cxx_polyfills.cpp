@@ -13,8 +13,6 @@
 
 _LIBCPP_BEGIN_NAMESPACE_STD
 
-template basic_istream<char, char_traits<char>>& basic_istream<char, char_traits<char>>::read(char_type*, streamsize);
-template basic_ostream<char, char_traits<char>>& basic_ostream<char, char_traits<char>>::write(const char_type*, streamsize);
 
 template streamsize basic_streambuf<char, char_traits<char>>::xsgetn(char_type*, streamsize);
 template streamsize basic_streambuf<char, char_traits<char>>::xsputn(const char_type*, streamsize);
