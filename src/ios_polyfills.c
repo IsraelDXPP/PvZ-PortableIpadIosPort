@@ -132,12 +132,8 @@ __attribute__((weak)) float __floatdisf(int64_t a) {
     return (float)__floatdidf(a);
 }
 
-__attribute__((weak)) void __gxx_personality_sj0() {
-}
-
-__attribute__((weak)) void _Unwind_SjLj_Register(void* ctx) {}
-__attribute__((weak)) void _Unwind_SjLj_Resume(void* ctx) {}
-__attribute__((weak)) void _Unwind_SjLj_Unregister(void* ctx) {}
+// ObjC stubs — these are needed because SDL2 references UIPointerStyle (iOS 13.4+)
+// which doesn't exist on iOS 9/10. We provide a null class so ObjC messaging nil is safe.
 __attribute__((weak)) void objc_msgSend_stret() {}
 
-void* OBJC_CLASS_$_UIPointerStyle = 0;
+__attribute__((weak)) void* OBJC_CLASS_$_UIPointerStyle;
