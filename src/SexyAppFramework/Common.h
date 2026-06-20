@@ -34,9 +34,10 @@
 #include <ctime>
 #if defined(__APPLE__)
 #include "ghc/filesystem.hpp"
-namespace std { namespace filesystem = ghc::filesystem; }
+namespace fs = ghc::filesystem;
 #else
 #include <filesystem>
+namespace fs = std::filesystem;
 #endif
 #include <string_view>
 #include <type_traits>
@@ -296,19 +297,19 @@ inline bool IsAutoBreakChar(char32_t theChar)
 
 // UTF-8 path conversion helpers for Windows Unicode path support
 #ifdef _WIN32
-inline std::filesystem::path PathFromU8(std::string_view s)
+inline fs::path PathFromU8(std::string_view s)
 {
-	return std::filesystem::path(std::u8string_view(reinterpret_cast<const char8_t*>(s.data()), s.size()));
+	return fs::path(std::u8string_view(reinterpret_cast<const char8_t*>(s.data()), s.size()));
 }
 
-inline std::string PathToU8(const std::filesystem::path& p)
+inline std::string PathToU8(const fs::path& p)
 {
 	auto u8 = p.generic_u8string();
 	return std::string(u8.begin(), u8.end());
 }
 #else
-inline std::filesystem::path PathFromU8(std::string_view s) { return std::filesystem::path(s); }
-inline std::string PathToU8(const std::filesystem::path& p) { return p.string(); }
+inline fs::path PathFromU8(std::string_view s) { return fs::path(s); }
+inline std::string PathToU8(const fs::path& p) { return p.string(); }
 #endif
 
 // Byte swap helpers

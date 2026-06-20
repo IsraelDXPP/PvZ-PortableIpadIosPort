@@ -49,8 +49,8 @@ bool Sexy::gDebug = false;
 static Sexy::MTRand gMTRand;
 namespace Sexy
 {
-	std::filesystem::path gAppDataFolder;
-	std::filesystem::path gResourceFolder;
+	fs::path gAppDataFolder;
+	fs::path gResourceFolder;
 	std::string gResourceFolderStr; // Cached string to avoid repeated conversions
 }
 
@@ -229,7 +229,7 @@ std::string Sexy::CommaSeperate(int theValue)
 std::string Sexy::GetCurDir()
 {
 	std::error_code ec;
-	std::filesystem::path cur = std::filesystem::current_path(ec);
+	fs::path cur = fs::current_path(ec);
 	if (ec)
 		return std::string();
 	return PathToU8(cur);
@@ -242,17 +242,17 @@ std::string Sexy::GetFullPath(std::string_view theRelPath)
 
 std::string Sexy::GetPathFrom(std::string_view theRelPath, std::string_view theDir)
 {
-	std::filesystem::path relPath = PathFromU8(theRelPath);
+	fs::path relPath = PathFromU8(theRelPath);
 	if (IsPathRooted(theRelPath))
 		return PathToU8(relPath.lexically_normal());
 
-	std::filesystem::path baseDir;
+	fs::path baseDir;
 	if (!theDir.empty())
 		baseDir = PathFromU8(theDir);
 	else
 	{
 		std::error_code ec;
-		baseDir = std::filesystem::current_path(ec);
+		baseDir = fs::current_path(ec);
 		if (ec)
 			return PathToU8(relPath.lexically_normal());
 	}
@@ -265,7 +265,7 @@ bool Sexy::IsPathRooted(std::string_view thePath)
 	if (thePath.empty())
 		return false;
 
-	const std::filesystem::path aPath = PathFromU8(thePath);
+	const fs::path aPath = PathFromU8(thePath);
 	if (aPath.has_root_path())
 		return true;
 
@@ -299,29 +299,29 @@ bool Sexy::AllowAllAccess(std::string_view theFileName)
 bool Sexy::Deltree(std::string_view thePath)
 {
 	std::error_code ec;
-	std::filesystem::path path = PathFromU8(thePath);
-	if (!std::filesystem::exists(path, ec))
+	fs::path path = PathFromU8(thePath);
+	if (!fs::exists(path, ec))
 		return false;
 
-	std::filesystem::remove_all(path, ec);
+	fs::remove_all(path, ec);
 	return !ec;
 }
 
 bool Sexy::FileExists(std::string_view theFileName)
 {
 	std::error_code ec;
-	return std::filesystem::exists(PathFromU8(theFileName), ec);
+	return fs::exists(PathFromU8(theFileName), ec);
 }
 
 void Sexy::MkDir(std::string_view theDir)
 {
 	std::error_code ec;
-	std::filesystem::create_directories(PathFromU8(theDir), ec);
+	fs::create_directories(PathFromU8(theDir), ec);
 }
 
 std::string Sexy::GetFileName(std::string_view thePath, bool noExtension)
 {
-	std::filesystem::path path = PathFromU8(thePath);
+	fs::path path = PathFromU8(thePath);
 	if (!path.has_filename())
 		return "";
 
@@ -333,8 +333,8 @@ std::string Sexy::GetFileName(std::string_view thePath, bool noExtension)
 
 std::string Sexy::GetFileDir(std::string_view thePath, bool withSlash)
 {
-	std::filesystem::path path = PathFromU8(thePath);
-	std::filesystem::path parent = path.parent_path();
+	fs::path path = PathFromU8(thePath);
+	fs::path parent = path.parent_path();
 	if (parent.empty())
 		return "";
 

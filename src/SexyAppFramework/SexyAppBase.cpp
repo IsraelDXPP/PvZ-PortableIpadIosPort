@@ -192,7 +192,7 @@ SexyAppBase::SexyAppBase()
 		const char* aHome = std::getenv("HOME");
 		if (aHome != nullptr && aHome[0] != '\0')
 		{
-			mResourceDir = (std::filesystem::path(aHome) / "Documents").generic_string() + "/";
+			mResourceDir = (fs::path(aHome) / "Documents").generic_string() + "/";
 		}
 		else
 		{
@@ -3344,7 +3344,7 @@ void SexyAppBase::Init()
 		const char* aHome = std::getenv("HOME");
 		if (aHome != nullptr && aHome[0] != '\0')
 		{
-			SetAppDataFolder((std::filesystem::path(aHome) / "Documents").generic_string() + "/");
+			SetAppDataFolder((fs::path(aHome) / "Documents").generic_string() + "/");
 		}
 	}
 #elif defined(__EMSCRIPTEN__)

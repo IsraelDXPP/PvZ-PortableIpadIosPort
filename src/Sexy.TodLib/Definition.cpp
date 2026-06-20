@@ -580,10 +580,10 @@ static std::string DefinitionGetCompiledCacheFullPath(const std::string& theComp
     return GetAppDataPath(aCacheRoot + theCompiledFilePath);
 }
 
-static bool DefinitionGetFileModTime(const std::string& theFilePath, std::filesystem::file_time_type& theTime)
+static bool DefinitionGetFileModTime(const std::string& theFilePath, fs::file_time_type& theTime)
 {
     std::error_code ec;
-    theTime = std::filesystem::last_write_time(Sexy::PathFromU8(theFilePath), ec);
+    theTime = fs::last_write_time(Sexy::PathFromU8(theFilePath), ec);
     return !ec;
 }
 
@@ -667,14 +667,14 @@ bool DefinitionIsCompiled(const std::string& theXMLFilePath)
         return true;
 
     std::string aFullCompiledPath = DefinitionGetCompiledCacheFullPath(aCompiledFilePath);
-    std::filesystem::file_time_type aCompiledFileTime{};
+    fs::file_time_type aCompiledFileTime{};
     if (!DefinitionGetFileModTime(aFullCompiledPath, aCompiledFileTime))
     {
         if (!DefinitionGetFileModTime(aCompiledFilePath, aCompiledFileTime))
             return false;
     }
 
-    std::filesystem::file_time_type aXMLFileTime{};
+    fs::file_time_type aXMLFileTime{};
     if (!DefinitionGetFileModTime(theXMLFilePath, aXMLFileTime))
     {
         TodTrace("Can't find source file to compile '%s'", theXMLFilePath.c_str());
