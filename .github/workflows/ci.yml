@@ -400,10 +400,8 @@ jobs:
     name: Build for iOS armv7 (iPad mini 1 / A5 chip)
     runs-on: macos-14
     env:
-      # iOS 9.3 is the last iOS version for iPad mini 1 (Apple A5).
-      # We download the legacy SDK from a community-maintained mirror.
-      IOS9_SDK_TAG: iPhoneOS9.3.sdk
-      IOS9_SDK_REPO: xybp888/iOS-SDKs
+      IOS10_SDK_TAG: iPhoneOS10.3.sdk
+      IOS10_SDK_REPO: theos/sdks
     steps:
     - uses: actions/checkout@v6
       with:
@@ -412,49 +410,33 @@ jobs:
     - name: Select Xcode 15
       run: sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer
 
-    - name: Inject iOS 9.3 SDK into Xcode
+    - name: Inject iOS 10.3 SDK into Xcode
       run: |
         SDKS_DIR="$(xcode-select -p)/Platforms/iPhoneOS.platform/Developer/SDKs"
         echo "Xcode SDKs dir: $SDKS_DIR"
         echo "Available SDKs before injection:"
         ls "$SDKS_DIR"
 
-        # Download iOS 9.3 SDK from the community mirror (xybp888/iOS-SDKs)
-        # This repo hosts patched Apple SDKs widely used by the iOS jailbreak
-        # and retro-iOS development community.
-        SDK_ARCHIVE="iPhoneOS9.3.sdk.tar.xz"
-        SDK_URL="https://github.com/${{ env.IOS9_SDK_REPO }}/releases/download/v9.3/$SDK_ARCHIVE"
-
-        echo "Attempting download from Releases: $SDK_URL"
-        if curl -fL --retry 3 -o "$SDK_ARCHIVE" "$SDK_URL" 2>/dev/null; then
-          echo "Downloaded SDK from Releases."
-          tar xf "$SDK_ARCHIVE"
-        else
-          # Fallback: clone sparse checkout (SDK folder only, no full history)
-          echo "Release download failed. Cloning SDK via sparse checkout..."
-          git clone \
-            --depth=1 \
-            --filter=blob:none \
-            --sparse \
-            https://github.com/${{ env.IOS9_SDK_REPO }}.git \
-            ios-sdks-repo
+        IOS10_SYSROOT="$SDKS_DIR/${{ env.IOS10_SDK_TAG }}"
+        echo "IOS10_SYSROOT=$IOS10_SYSROOT" >> $GITHUB_ENV
+        
+        if [ ! -d "$IOS10_SYSROOT" ]; then
+          echo "Cloning ${{ env.IOS10_SDK_TAG }} from ${{ env.IOS10_SDK_REPO }} via sparse checkout..."
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/${{ env.IOS10_SDK_REPO }} ios-sdks-repo
           cd ios-sdks-repo
-          git sparse-checkout set "${{ env.IOS9_SDK_TAG }}"
+          git sparse-checkout set ${{ env.IOS10_SDK_TAG }}
           cd ..
-          mv ios-sdks-repo/${{ env.IOS9_SDK_TAG }} .
+          sudo mv ios-sdks-repo/${{ env.IOS10_SDK_TAG }} "$SDKS_DIR/"
         fi
 
-        # Inject into Xcode
-        sudo cp -R "${{ env.IOS9_SDK_TAG }}" "$SDKS_DIR/"
         echo "Available SDKs after injection:"
         ls "$SDKS_DIR"
 
-        # Verify
-        if [ ! -d "$SDKS_DIR/${{ env.IOS9_SDK_TAG }}" ]; then
+        if [ ! -d "$SDKS_DIR/${{ env.IOS10_SDK_TAG }}" ]; then
           echo "ERROR: SDK injection failed!"
           exit 1
         fi
-        echo "iOS 9.3 SDK successfully injected."
+        echo "iOS 10.3 SDK successfully injected."
 
     - name: Setup vcpkg
       uses: lukka/run-vcpkg@v11
@@ -464,8 +446,7 @@ jobs:
     - name: Build PvZ-Portable for iPad mini 1 (armv7, iOS 9.0)
       run: |
         BUILD_DIR=build-ios-ipadmini1
-        SDKS_DIR="$(xcode-select -p)/Platforms/iPhoneOS.platform/Developer/SDKs"
-        IOS9_SYSROOT="$SDKS_DIR/${{ env.IOS9_SDK_TAG }}"
+        # IOS10_SYSROOT is loaded from $GITHUB_ENV from the previous step
 
         cmake -B $BUILD_DIR \
           -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
@@ -474,7 +455,7 @@ jobs:
           -DCMAKE_SYSTEM_NAME=iOS \
           -DCMAKE_OSX_DEPLOYMENT_TARGET=9.0 \
           -DCMAKE_OSX_ARCHITECTURES=armv7 \
-          -DCMAKE_OSX_SYSROOT="$IOS9_SYSROOT" \
+          -DCMAKE_OSX_SYSROOT="$IOS10_SYSROOT" \
           -DIOS_IPADMINI1=ON \
           -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_C_FLAGS="-Wl,-ld_classic" \
