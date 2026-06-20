@@ -137,3 +137,21 @@ __attribute__((weak)) float __floatdisf(int64_t a) {
 __attribute__((weak)) void objc_msgSend_stret() {}
 
 __attribute__((weak)) void* OBJC_CLASS_$_UIPointerStyle;
+__attribute__((weak)) void* OBJC_CLASS_$_UIPointerInteraction;
+__attribute__((weak)) void* OBJC_CLASS_$_UIPointerRegion;
+__attribute__((weak)) void* OBJC_CLASS_$_GCColor;
+__attribute__((weak)) void* OBJC_CLASS_$_GCKeyboard;
+__attribute__((weak)) void* OBJC_CLASS_$_GCMouse;
+
+__attribute__((weak)) void* GCInputRightShoulder;
+__attribute__((weak)) void* GCInputRightThumbstick;
+__attribute__((weak)) void* GCInputRightThumbstickButton;
+__attribute__((weak)) void* GCInputRightTrigger;
+__attribute__((weak)) void* GCInputXboxPaddleFour;
+__attribute__((weak)) void* GCInputXboxPaddleOne;
+__attribute__((weak)) void* GCInputXboxPaddleThree;
+__attribute__((weak)) void* GCInputXboxPaddleTwo;
+__attribute__((weak)) void* GCKeyboardDidConnectNotification;
+__attribute__((weak)) void* GCKeyboardDidDisconnectNotification;
+__attribute__((weak)) void* GCMouseDidConnectNotification;
+__attribute__((weak)) void* GCMouseDidDisconnectNotification;

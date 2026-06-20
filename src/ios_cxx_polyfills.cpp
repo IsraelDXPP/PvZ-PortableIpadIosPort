@@ -18,6 +18,8 @@ template basic_ostream<char, char_traits<char>>& basic_ostream<char, char_traits
 template streamsize basic_streambuf<char, char_traits<char>>::xsgetn(char_type*, streamsize);
 template streamsize basic_streambuf<char, char_traits<char>>::xsputn(const char_type*, streamsize);
 
+template class basic_istream<char, char_traits<char>>;
+template class basic_ostream<char, char_traits<char>>;
 template class basic_ifstream<char, char_traits<char>>;
 template class basic_ofstream<char, char_traits<char>>;
 
