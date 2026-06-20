@@ -66,12 +66,28 @@ __attribute__((weak)) int64_t __moddi3(int64_t a, int64_t b) {
     return a < 0 ? -rem : rem;
 }
 
+__attribute__((weak)) int32_t __divsi3(int32_t a, int32_t b) {
+    int sign = (a < 0) ^ (b < 0);
+    uint32_t ua = a < 0 ? -a : a;
+    uint32_t ub = b < 0 ? -b : b;
+    uint32_t q = __udivsi3(ua, ub);
+    return sign ? -q : q;
+}
+
+__attribute__((weak)) int64_t __divdi3(int64_t a, int64_t b) {
+    int sign = (a < 0) ^ (b < 0);
+    uint64_t ua = a < 0 ? -a : a;
+    uint64_t ub = b < 0 ? -b : b;
+    uint64_t q = __udivdi3(ua, ub);
+    return sign ? -q : q;
+}
+
 #endif // __arm__
 
 #ifdef __APPLE__
-// __availability_version_check was added in iOS 13 for __builtin_available().
+// _availability_version_check was added in iOS 13 for __builtin_available().
 // Since we are targeting iOS 9/10, we should return 0 to indicate the features are NOT available.
-__attribute__((weak)) uint32_t __availability_version_check(uint32_t count, void *versions) {
+__attribute__((weak)) uint32_t _availability_version_check(uint32_t count, void *versions) {
     return 0;
 }
 #endif
@@ -118,3 +134,10 @@ __attribute__((weak)) float __floatdisf(int64_t a) {
 
 __attribute__((weak)) void __gxx_personality_sj0() {
 }
+
+__attribute__((weak)) void _Unwind_SjLj_Register(void* ctx) {}
+__attribute__((weak)) void _Unwind_SjLj_Resume(void* ctx) {}
+__attribute__((weak)) void _Unwind_SjLj_Unregister(void* ctx) {}
+__attribute__((weak)) void objc_msgSend_stret() {}
+
+void* OBJC_CLASS_$_UIPointerStyle = 0;
