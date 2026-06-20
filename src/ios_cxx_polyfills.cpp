@@ -1,3 +1,7 @@
+#include <stdio.h>
+#include <wchar.h>
+#include <sys/types.h>
+
 #include <istream>
 #include <ostream>
 #include <fstream>
