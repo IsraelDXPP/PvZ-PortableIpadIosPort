@@ -53,8 +53,22 @@ void SexyAppBase::MakeWindow()
 
 		SDL_Init(SDL_INIT_VIDEO);
 
+#ifdef __IPHONEOS__
+		// On iOS, always use fullscreen — SDL_WINDOWPOS_CENTERED causes NaN on iOS 9
+		// because UIKit hasn't finished initializing display bounds yet (returns 0).
+		Uint32 winFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_FULLSCREEN_DESKTOP;
+		int winX = SDL_WINDOWPOS_UNDEFINED;
+		int winY = SDL_WINDOWPOS_UNDEFINED;
+		int winW = 0; // SDL ignores size in fullscreen desktop mode
+		int winH = 0;
+#else
 		Uint32 winFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE
 			| (!mIsWindowed ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+		int winX = SDL_WINDOWPOS_CENTERED;
+		int winY = SDL_WINDOWPOS_CENTERED;
+		int winW = mWidth * IMG_DOWNSCALE;
+		int winH = mHeight * IMG_DOWNSCALE;
+#endif
 
 		// Try OpenGL ES 2.0 first (Linux, most Windows drivers, ANGLE, etc.)
 		SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
@@ -63,8 +77,8 @@ void SexyAppBase::MakeWindow()
 
 		mWindow = (void*)SDL_CreateWindow(
 			mTitle.c_str(),
-			SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-			mWidth * IMG_DOWNSCALE, mHeight * IMG_DOWNSCALE, winFlags);
+			winX, winY,
+			winW, winH, winFlags);
 
 		if (mWindow)
 			mContext = (void*)SDL_GL_CreateContext((SDL_Window*)mWindow);
