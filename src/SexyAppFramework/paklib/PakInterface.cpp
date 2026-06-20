@@ -23,7 +23,7 @@
  */
 
 #include <algorithm>
-#include <filesystem>
+
 #include "Common.h"
 #include "PakInterface.h"
 #include "fcaseopen/fcaseopen.h"
