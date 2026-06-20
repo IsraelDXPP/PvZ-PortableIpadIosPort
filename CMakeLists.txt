@@ -93,8 +93,8 @@ else()
 	if(VCPKG_TOOLCHAIN)
 		find_package(Vorbis CONFIG REQUIRED)
 		find_package(Ogg CONFIG REQUIRED)
-		if(IOS AND IOS_IPADMINI1)
-			# libopenmpt requires C++17 which fails on iOS 9 SDK. Fallback to libmodplug.
+		if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+			# libopenmpt requires C++17 which fails on older iOS SDKs. Fallback to libmodplug.
 			find_package(PkgConfig REQUIRED)
 			pkg_check_modules(MODPLUG REQUIRED libmodplug)
 			set(OPENMPT_LIB ${MODPLUG_LIBRARIES})
