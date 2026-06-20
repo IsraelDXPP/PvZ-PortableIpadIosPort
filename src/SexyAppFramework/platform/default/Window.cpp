@@ -54,13 +54,19 @@ void SexyAppBase::MakeWindow()
 		SDL_Init(SDL_INIT_VIDEO);
 
 #ifdef __IPHONEOS__
-		// On iOS, always use fullscreen — SDL_WINDOWPOS_CENTERED causes NaN on iOS 9
-		// because UIKit hasn't finished initializing display bounds yet (returns 0).
-		Uint32 winFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_FULLSCREEN_DESKTOP;
-		int winX = SDL_WINDOWPOS_UNDEFINED;
-		int winY = SDL_WINDOWPOS_UNDEFINED;
-		int winW = 0; // SDL ignores size in fullscreen desktop mode
-		int winH = 0;
+		// On iOS, explicit dimensions and 0,0 position to avoid CALayer NaN exceptions
+		// on older iOS versions (iOS 9) when screen bounds aren't fully resolved yet.
+		Uint32 winFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_FULLSCREEN | SDL_WINDOW_SHOWN;
+		int winX = 0;
+		int winY = 0;
+		int winW = mWidth * IMG_DOWNSCALE;
+		int winH = mHeight * IMG_DOWNSCALE;
+		
+		// Failsafe bounds just in case SexyApp logic is not initialized yet
+		if (winW <= 0 || winH <= 0) {
+			winW = 1024;
+			winH = 768;
+		}
 #else
 		Uint32 winFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE
 			| (!mIsWindowed ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
