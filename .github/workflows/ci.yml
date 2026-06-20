@@ -466,7 +466,7 @@ jobs:
           -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-ld_classic -Wl,-w" \
           -G Ninja
 
-        cmake --build $BUILD_DIR --config Release
+        cmake --build $BUILD_DIR --config Release > build_log.txt 2>&1 || (tail -n 100 build_log.txt && exit 1)
 
     - name: Create unsigned IPA for iPad mini 1
       run: |
