@@ -132,6 +132,20 @@ option(PVZ_DEBUG "Enable PVZ_DEBUG macro to enable cheats, hidden features, etc.
 option(CONSOLE "Show console on Windows" ${WIN_CONSOLE_DEFAULT})
 option(DO_FIX_BUGS "Define DO_FIX_BUGS macro (Community fixes for original game bugs of 1.2.0.1073 GOTY Edition)" OFF)
 
+# iPad mini 1 compatibility mode: targets armv7 / iOS 9.0 (Apple A5 chip)
+# Requires the iPhoneOS9.x SDK to be present in Xcode's SDK directory.
+# The resulting unsigned IPA can be sideloaded via AltStore or Sideloadly.
+option(IOS_IPADMINI1 "Build for iPad mini 1 (armv7, iOS 9.0)" OFF)
+if(IOS AND IOS_IPADMINI1)
+	set(IOS_DEPLOYMENT_TARGET "9.0" CACHE STRING "iOS deployment target for iPad mini 1 build")
+	set(IOS_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/ios/Info-ipadmini1.plist.in")
+	set(IOS_DEVICE_FAMILY "2") # iPad only (family 2) — iPad mini 1 is an iPad
+else()
+	set(IOS_DEPLOYMENT_TARGET "15.0" CACHE STRING "iOS deployment target")
+	set(IOS_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/ios/Info.plist.in")
+	set(IOS_DEVICE_FAMILY "1,2") # iPhone + iPad
+endif()
+
 if(EMSCRIPTEN)
 	list(PREPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/CMake")
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -sUSE_SDL=2 -sUSE_ZLIB=1 -sUSE_LIBPNG=1 -sUSE_LIBJPEG=1 -sUSE_OGG=1 -sUSE_VORBIS=1 -sUSE_MPG123=1")
@@ -328,9 +342,9 @@ elseif (IOS)
 		MACOSX_BUNDLE_BUNDLE_NAME "PvZ Portable"
 		MACOSX_BUNDLE_BUNDLE_VERSION "0.1"
 		MACOSX_BUNDLE_SHORT_VERSION_STRING "0.1"
-		MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/ios/Info.plist.in"
-		XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
-		XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "15.0"
+		MACOSX_BUNDLE_INFO_PLIST "${IOS_INFO_PLIST}"
+		XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "${IOS_DEVICE_FAMILY}"
+		XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "${IOS_DEPLOYMENT_TARGET}"
 		XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "io.github.wszqkzqk.pvz-portable"
 		XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "-"
 		XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon"

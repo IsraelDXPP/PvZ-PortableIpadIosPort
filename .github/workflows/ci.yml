@@ -398,6 +398,120 @@ jobs:
         name: pvz-portable-ios
         path: dist/
 
+  build-ios-ipadmini1:
+    name: Build for iOS armv7 (iPad mini 1 / A5 chip)
+    runs-on: macos-13
+    env:
+      # iOS 9.3 is the last iOS version for iPad mini 1 (Apple A5).
+      # We download the legacy SDK from a community-maintained mirror.
+      IOS9_SDK_TAG: iPhoneOS9.3.sdk
+      IOS9_SDK_REPO: xybp888/iOS-SDKs
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+
+    - name: Select Xcode 15
+      run: sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer
+
+    - name: Inject iOS 9.3 SDK into Xcode
+      run: |
+        SDKS_DIR="$(xcode-select -p)/Platforms/iPhoneOS.platform/Developer/SDKs"
+        echo "Xcode SDKs dir: $SDKS_DIR"
+        echo "Available SDKs before injection:"
+        ls "$SDKS_DIR"
+
+        # Download iOS 9.3 SDK from the community mirror (xybp888/iOS-SDKs)
+        # This repo hosts patched Apple SDKs widely used by the iOS jailbreak
+        # and retro-iOS development community.
+        SDK_ARCHIVE="iPhoneOS9.3.sdk.tar.xz"
+        SDK_URL="https://github.com/${{ env.IOS9_SDK_REPO }}/releases/download/v9.3/$SDK_ARCHIVE"
+
+        echo "Attempting download from Releases: $SDK_URL"
+        if curl -fL --retry 3 -o "$SDK_ARCHIVE" "$SDK_URL" 2>/dev/null; then
+          echo "Downloaded SDK from Releases."
+          tar xf "$SDK_ARCHIVE"
+        else
+          # Fallback: clone sparse checkout (SDK folder only, no full history)
+          echo "Release download failed. Cloning SDK via sparse checkout..."
+          git clone \
+            --depth=1 \
+            --filter=blob:none \
+            --sparse \
+            https://github.com/${{ env.IOS9_SDK_REPO }}.git \
+            ios-sdks-repo
+          cd ios-sdks-repo
+          git sparse-checkout set "${{ env.IOS9_SDK_TAG }}"
+          cd ..
+          mv ios-sdks-repo/${{ env.IOS9_SDK_TAG }} .
+        fi
+
+        # Inject into Xcode
+        sudo cp -R "${{ env.IOS9_SDK_TAG }}" "$SDKS_DIR/"
+        echo "Available SDKs after injection:"
+        ls "$SDKS_DIR"
+
+        # Verify
+        if [ ! -d "$SDKS_DIR/${{ env.IOS9_SDK_TAG }}" ]; then
+          echo "ERROR: SDK injection failed!"
+          exit 1
+        fi
+        echo "iOS 9.3 SDK successfully injected."
+
+    - name: Setup vcpkg
+      uses: lukka/run-vcpkg@v11
+      with:
+        vcpkgJsonGlob: vcpkg.json
+
+    - name: Build PvZ-Portable for iPad mini 1 (armv7, iOS 9.0)
+      run: |
+        BUILD_DIR=build-ios-ipadmini1
+        SDKS_DIR="$(xcode-select -p)/Platforms/iPhoneOS.platform/Developer/SDKs"
+        IOS9_SYSROOT="$SDKS_DIR/${{ env.IOS9_SDK_TAG }}"
+
+        cmake -B $BUILD_DIR \
+          -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
+          -DVCPKG_TARGET_TRIPLET=armv7-ios \
+          -DVCPKG_OVERLAY_TRIPLETS="$GITHUB_WORKSPACE/CMake" \
+          -DCMAKE_SYSTEM_NAME=iOS \
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=9.0 \
+          -DCMAKE_OSX_ARCHITECTURES=armv7 \
+          -DCMAKE_OSX_SYSROOT="$IOS9_SYSROOT" \
+          -DIOS_IPADMINI1=ON \
+          -DCMAKE_BUILD_TYPE=Release \
+          -G Xcode
+
+        cmake --build $BUILD_DIR --config Release -- \
+          -sdk iphoneos \
+          SDKROOT="$IOS9_SYSROOT" \
+          CODE_SIGN_IDENTITY="-" \
+          CODE_SIGNING_ALLOWED=NO
+
+    - name: Create unsigned IPA for iPad mini 1
+      run: |
+        APP_PATH=$(find build-ios-ipadmini1 -name "pvz-portable.app" -path "*Release*" | head -1)
+        if [ -z "$APP_PATH" ]; then
+          echo "ERROR: .app bundle not found!"
+          exit 1
+        fi
+        echo "Found app at: $APP_PATH"
+
+        # Verify the binary is armv7
+        echo "Binary architectures:"
+        lipo -info "$APP_PATH/pvz-portable" || true
+
+        mkdir -p dist/Payload
+        cp -R "$APP_PATH" dist/Payload/
+        cd dist
+        zip -r -y pvz-portable-ios-armv7-ipadmini1.ipa Payload/
+        rm -rf Payload
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v7
+      with:
+        name: pvz-portable-ios-ipadmini1
+        path: dist/
+
   build-wasm:
     name: Build for WebAssembly (Emscripten)
     runs-on: ubuntu-latest
@@ -455,7 +569,7 @@ jobs:
 
   release:
     name: Release
-    needs: ['build-archlinux', 'build-windows-msys2-ucrt64', 'build-windows-msvc-x64', 'build-macos', 'build-android', 'build-ios', 'build-wasm']
+    needs: ['build-archlinux', 'build-windows-msys2-ucrt64', 'build-windows-msvc-x64', 'build-macos', 'build-android', 'build-ios', 'build-ios-ipadmini1', 'build-wasm']
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
@@ -491,6 +605,9 @@ jobs:
 
         echo "Preparing iOS file..."
         mv artifacts/pvz-portable-ios/pvz-portable-ios-arm64.ipa release_files/pvz-portable-ios-arm64.ipa
+
+        echo "Preparing iOS iPad mini 1 (armv7) file..."
+        mv artifacts/pvz-portable-ios-ipadmini1/pvz-portable-ios-armv7-ipadmini1.ipa release_files/pvz-portable-ios-armv7-ipadmini1.ipa
 
         echo "Preparing WebAssembly file..."
         cd artifacts/pvz-portable-wasm
