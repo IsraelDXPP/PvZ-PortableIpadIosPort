@@ -477,13 +477,9 @@ jobs:
           -DCMAKE_OSX_SYSROOT="$IOS9_SYSROOT" \
           -DIOS_IPADMINI1=ON \
           -DCMAKE_BUILD_TYPE=Release \
-          -G Xcode
+          -G Ninja
 
-        cmake --build $BUILD_DIR --config Release -- \
-          -sdk iphoneos \
-          SDKROOT="$IOS9_SYSROOT" \
-          CODE_SIGN_IDENTITY="-" \
-          CODE_SIGNING_ALLOWED=NO
+        cmake --build $BUILD_DIR --config Release
 
     - name: Create unsigned IPA for iPad mini 1
       run: |
