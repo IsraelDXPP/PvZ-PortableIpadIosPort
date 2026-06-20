@@ -75,3 +75,46 @@ __attribute__((weak)) uint32_t __availability_version_check(uint32_t count, void
     return 0;
 }
 #endif
+
+__attribute__((weak)) int64_t __fixdfdi(double a) {
+    union { double d; uint64_t u; } v = { .d = a };
+    int sign = v.u >> 63;
+    int exp = ((v.u >> 52) & 0x7FF) - 1023;
+    if (exp < 0) return 0;
+    if (exp >= 63) return sign ? INT64_MIN : INT64_MAX;
+    uint64_t frac = (v.u & ((1ULL << 52) - 1)) | (1ULL << 52);
+    uint64_t res = (exp > 52) ? (frac << (exp - 52)) : (frac >> (52 - exp));
+    return sign ? -(int64_t)res : (int64_t)res;
+}
+
+__attribute__((weak)) uint64_t __fixunsdfdi(double a) {
+    union { double d; uint64_t u; } v = { .d = a };
+    int sign = v.u >> 63;
+    if (sign) return 0;
+    int exp = ((v.u >> 52) & 0x7FF) - 1023;
+    if (exp < 0) return 0;
+    if (exp >= 64) return UINT64_MAX;
+    uint64_t frac = (v.u & ((1ULL << 52) - 1)) | (1ULL << 52);
+    return (exp > 52) ? (frac << (exp - 52)) : (frac >> (52 - exp));
+}
+
+__attribute__((weak)) double __floatundidf(uint64_t a) {
+    uint32_t hi = a >> 32;
+    uint32_t lo = a & 0xFFFFFFFF;
+    return ((double)hi) * 4294967296.0 + (double)lo;
+}
+
+__attribute__((weak)) double __floatdidf(int64_t a) {
+    if (a < 0) {
+        if (a == INT64_MIN) return -9223372036854775808.0;
+        return -__floatundidf((uint64_t)(-a));
+    }
+    return __floatundidf((uint64_t)a);
+}
+
+__attribute__((weak)) float __floatdisf(int64_t a) {
+    return (float)__floatdidf(a);
+}
+
+__attribute__((weak)) void __gxx_personality_sj0() {
+}
