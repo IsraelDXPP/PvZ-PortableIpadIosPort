@@ -23,6 +23,11 @@ jobs:
       with:
         fetch-depth: 0
 
+    - name: Setup ccache
+      uses: hendrikmuhs/ccache-action@v1.2.14
+      with:
+        key: ${{ runner.os }}-archlinux
+
     - name: Install Base Dependencies
       run: |
         pacman -Syu --noconfirm
@@ -52,7 +57,7 @@ jobs:
       run: |
         sudo -u builder bash -lc '
           mkdir build
-          cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release
+          cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build
 
           mkdir -p dist
@@ -73,6 +78,11 @@ jobs:
     - uses: actions/checkout@v6
       with:
         fetch-depth: 0
+
+    - name: Setup ccache
+      uses: hendrikmuhs/ccache-action@v1.2.14
+      with:
+        key: ${{ runner.os }}-msys2
 
     - uses: msys2/setup-msys2@v2
       with:
@@ -95,7 +105,7 @@ jobs:
       shell: msys2 {0}
       run: |
         mkdir build
-        cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release -DCONSOLE=OFF -DBUILD_STATIC=ON -DCMAKE_COLOR_DIAGNOSTICS=ON
+        cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release -DCONSOLE=OFF -DBUILD_STATIC=ON -DCMAKE_COLOR_DIAGNOSTICS=ON -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
         cmake --build build
         
         mkdir -p dist
@@ -118,18 +128,24 @@ jobs:
 
     - uses: ilammy/msvc-dev-cmd@v1
 
+    - name: Setup sccache
+      uses: hendrikmuhs/ccache-action@v1.2.14
+      with:
+        variant: sccache
+        key: ${{ runner.os }}-msvc
+
     - name: Install Ninja
       run: choco install ninja -y
 
     - name: Setup vcpkg (manifest mode)
-      uses: lukka/run-vcpkg@v11
+      uses: lukka/run-vcpkg@v11.5
       with:
         vcpkgJsonGlob: vcpkg.json
 
     - name: Compile PvZ-Portable for Windows (MSVC)
       shell: pwsh
       run: |
-        cmake -G "Ninja" -B build -DCMAKE_BUILD_TYPE=Release -DCONSOLE=OFF -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static
+        cmake -G "Ninja" -B build -DCMAKE_BUILD_TYPE=Release -DCONSOLE=OFF -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
         cmake --build build
 
         New-Item -ItemType Directory -Force -Path dist | Out-Null
@@ -185,6 +201,11 @@ jobs:
       with:
         fetch-depth: 0
 
+    - name: Setup ccache
+      uses: hendrikmuhs/ccache-action@v1.2.14
+      with:
+        key: ${{ runner.os }}-macos
+
     - name: Install Dependencies
       run: |
         brew update
@@ -202,7 +223,7 @@ jobs:
     - name: Build PvZ-Portable
       run: |
         mkdir build
-        cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release
+        cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
         cmake --build build
 
         mkdir -p dist
@@ -228,6 +249,11 @@ jobs:
     - uses: actions/checkout@v6
       with:
         fetch-depth: 0
+
+    - name: Setup ccache
+      uses: hendrikmuhs/ccache-action@v1.2.14
+      with:
+        key: ${{ runner.os }}-android
 
     - name: Set up JDK
       uses: actions/setup-java@v5
@@ -266,7 +292,7 @@ jobs:
         mv "SDL2-${SDL2_TAG}" sdl2-src
 
     - name: Setup vcpkg
-      uses: lukka/run-vcpkg@v11
+      uses: lukka/run-vcpkg@v11.5
       with:
         vcpkgJsonGlob: vcpkg.json
 
@@ -301,7 +327,10 @@ jobs:
           -DANDROID_ABI=$ABI \
           -DANDROID_PLATFORM=android-$ANDROID_API \
           -DSDL2_DIR=$SDL2_PREFIX/lib/cmake/SDL2 \
-          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+          -G Ninja
 
         cmake --build $BUILD_DIR -j$(nproc)
 
@@ -359,7 +388,7 @@ jobs:
         fetch-depth: 0
 
     - name: Setup vcpkg
-      uses: lukka/run-vcpkg@v11
+      uses: lukka/run-vcpkg@v11.5
       with:
         vcpkgJsonGlob: vcpkg.json
 
@@ -407,6 +436,11 @@ jobs:
       with:
         fetch-depth: 0
 
+    - name: Setup ccache
+      uses: hendrikmuhs/ccache-action@v1.2.14
+      with:
+        key: ${{ runner.os }}-ios-ipadmini1
+
     - name: Select Xcode 15
       run: sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer
 
@@ -443,7 +477,7 @@ jobs:
         echo "iOS 10.3 SDK successfully injected."
 
     - name: Setup vcpkg
-      uses: lukka/run-vcpkg@v11
+      uses: lukka/run-vcpkg@v11.5
       with:
         vcpkgJsonGlob: vcpkg.json
 
@@ -464,6 +498,8 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_EXE_LINKER_FLAGS="-Wl,-ld_classic -Wl,-w" \
           -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-ld_classic -Wl,-w" \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
           -G Ninja
 
         cmake --build $BUILD_DIR --config Release > build_log.txt 2>&1 || (tail -n 100 build_log.txt && exit 1)
