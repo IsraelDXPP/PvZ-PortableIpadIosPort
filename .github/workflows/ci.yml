@@ -507,6 +507,13 @@ jobs:
         echo "Binary architectures:"
         lipo -info "$APP_PATH/pvz-portable" || true
 
+        # Ad-hoc sign the binary so iOS mobile_installation_proxy accepts it.
+        # Without ANY code signature (even a fake one), iOS rejects the IPA
+        # with LaunchServicesError 0 even on jailbroken devices with AppSync.
+        echo "Ad-hoc signing app bundle..."
+        codesign --force --deep --sign - "$APP_PATH" || true
+        echo "Codesign done."
+
         mkdir -p dist/Payload
         cp -R "$APP_PATH" dist/Payload/
         cd dist
