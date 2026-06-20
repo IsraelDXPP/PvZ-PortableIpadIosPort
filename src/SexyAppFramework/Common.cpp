@@ -22,12 +22,15 @@
  * along with PvZ-Portable. If not, see <https://www.gnu.org/licenses/>.
  */
 
+#if defined(__APPLE__)
+#define GHC_FILESYSTEM_IMPLEMENTATION
+#endif
 #include "Common.h"
 #include "misc/MTRand.h"
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
-#include <filesystem>
+
 #include <chrono>
 #include <cstdarg>
 #include <cstdio>

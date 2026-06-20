@@ -32,7 +32,12 @@
 #include <cstdlib>
 #include <cstdint>
 #include <ctime>
+#if defined(__APPLE__)
+#include "ghc/filesystem.hpp"
+namespace std { namespace filesystem = ghc::filesystem; }
+#else
 #include <filesystem>
+#endif
 #include <string_view>
 #include <type_traits>
 #include <bit>

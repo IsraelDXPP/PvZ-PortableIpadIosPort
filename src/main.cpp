@@ -23,7 +23,7 @@
 #include "Resources.h"
 #include "Sexy.TodLib/TodStringFile.h"
 #include <cstdlib>
-#include <filesystem>
+
 #include <vector>
 using namespace Sexy;
 
