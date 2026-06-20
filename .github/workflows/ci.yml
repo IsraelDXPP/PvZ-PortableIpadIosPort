@@ -470,7 +470,7 @@ jobs:
 
     - name: Create unsigned IPA for iPad mini 1
       run: |
-        APP_PATH=$(find build-ios-ipadmini1 -name "pvz-portable.app" -path "*Release*" | head -1)
+        APP_PATH=$(find build-ios-ipadmini1 -name "pvz-portable.app" | head -1)
         if [ -z "$APP_PATH" ]; then
           echo "ERROR: .app bundle not found!"
           exit 1
