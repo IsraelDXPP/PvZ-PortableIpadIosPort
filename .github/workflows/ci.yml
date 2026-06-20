@@ -477,6 +477,7 @@ jobs:
           -DCMAKE_OSX_SYSROOT="$IOS9_SYSROOT" \
           -DIOS_IPADMINI1=ON \
           -DCMAKE_BUILD_TYPE=Release \
+
           -G Ninja
 
         cmake --build $BUILD_DIR --config Release
