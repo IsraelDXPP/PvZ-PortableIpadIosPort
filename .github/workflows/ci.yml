@@ -398,7 +398,7 @@ jobs:
 
   build-ios-ipadmini1:
     name: Build for iOS armv7 (iPad mini 1 / A5 chip)
-    runs-on: macos-13
+    runs-on: macos-14
     env:
       # iOS 9.3 is the last iOS version for iPad mini 1 (Apple A5).
       # We download the legacy SDK from a community-maintained mirror.
