@@ -427,6 +427,10 @@ jobs:
           git sparse-checkout set ${{ env.IOS10_SDK_TAG }}
           cd ..
           sudo mv ios-sdks-repo/${{ env.IOS10_SDK_TAG }} "$SDKS_DIR/"
+          
+          # Fix missing C++ headers in legacy SDK by copying them from the modern SDK
+          # Xcode 15's clang expects C++ headers to be inside the SDK, but older SDKs didn't have them there.
+          sudo cp -R "$SDKS_DIR/iPhoneOS.sdk/usr/include/c++" "$SDKS_DIR/${{ env.IOS10_SDK_TAG }}/usr/include/"
         fi
 
         echo "Available SDKs after injection:"
