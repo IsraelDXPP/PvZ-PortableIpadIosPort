@@ -1,3 +1,4 @@
+#if defined(__APPLE__) && defined(__arm__)
 #include <stdio.h>
 #include <wchar.h>
 #include <sys/types.h>
@@ -22,5 +23,5 @@ template class basic_istream<char, char_traits<char>>;
 template class basic_ostream<char, char_traits<char>>;
 template class basic_ifstream<char, char_traits<char>>;
 template class basic_ofstream<char, char_traits<char>>;
-
 _LIBCPP_END_NAMESPACE_STD
+#endif
