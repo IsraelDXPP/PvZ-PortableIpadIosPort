@@ -332,6 +332,9 @@ elseif (ANDROID)
 	target_link_libraries(pvz-portable PRIVATE GLESv2 EGL android log)
 	set_target_properties(pvz-portable PROPERTIES OUTPUT_NAME "main")
 elseif (IOS)
+	target_sources(pvz-portable PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}/src/ios_window.mm"
+	)
 	target_link_libraries(pvz-portable PRIVATE
 		"-framework Foundation"
 		"-framework UIKit"
