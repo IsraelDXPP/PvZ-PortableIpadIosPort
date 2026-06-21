@@ -116,13 +116,27 @@ int main(int argc, char** argv)
 	fs::path aDocsPath;
 	bool aHasGameResources = false;
 
+	// Log startup so we can confirm the binary actually ran
+	iOS_WriteLogPublic("STARTUP", aHasDocsPath ? aDocsDir : "(no documents path)");
+
 	if (aHasDocsPath)
 	{
 		aDocsPath = fs::path(aDocsDir);
 		std::error_code ec;
-		aHasGameResources =
-			fs::is_regular_file(aDocsPath / "main.pak", ec) &&
-			fs::is_directory(aDocsPath / "properties", ec);
+		bool hasPak  = fs::is_regular_file(aDocsPath / "main.pak",    ec);
+		bool hasProps = fs::is_directory  (aDocsPath / "properties",   ec);
+		aHasGameResources = hasPak && hasProps;
+
+		// Log individual asset presence for diagnostics
+		iOS_WriteLogPublic("ASSETS", hasPak
+			? (hasProps ? "main.pak=YES props=YES -> OK"
+			            : "main.pak=YES props=MISSING")
+			: (hasProps ? "main.pak=MISSING props=YES"
+			            : "main.pak=MISSING props=MISSING"));
+	}
+	else
+	{
+		iOS_WriteLogPublic("ASSETS", "Could not determine Documents path");
 	}
 
 	if (!aHasGameResources)
@@ -138,6 +152,9 @@ int main(int argc, char** argv)
 			}
 		}
 
+		// iOS_ShowBlockingAlert always writes to pvz_log.txt first,
+		// so this message is guaranteed to be recorded even if the UI
+		// alert cannot be shown (e.g. before UIApplicationMain).
 		iOS_ShowBlockingAlert(
 			"Resources Not Found",
 			"Please place main.pak and the properties/ folder into the "
