@@ -22,6 +22,14 @@ void iOS_ShowBlockingAlert(const char* title, const char* message);
    Falls back to 1024x768 if it times out. */
 bool iOS_WaitForValidScreenBounds(int* outW, int* outH, int maxWaitMs);
 
+/* Safe replacement for SDL_CreateWindow on iOS.
+   Wraps the call in ObjC @try/@catch so a CALayerInvalidGeometry NSException
+   cannot escape into the SjLj C++ unwinder and cause __cxa_bad_cast/abort.
+   Returns NULL on unrecoverable failure (caller should show an error). */
+struct SDL_Window;
+typedef unsigned int Uint32;
+SDL_Window* iOS_CreateWindowSafe(const char* title, int x, int y, int w, int h, Uint32 flags);
+
 #ifdef __cplusplus
 }
 #endif

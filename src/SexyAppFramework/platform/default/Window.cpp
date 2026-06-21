@@ -58,14 +58,27 @@ void SexyAppBase::MakeWindow()
 		SDL_Init(SDL_INIT_VIDEO);
 
 #ifdef __IPHONEOS__
-		// On iOS, explicit dimensions and 0,0 position to avoid CALayer NaN exceptions
-		// on older iOS versions (iOS 9) when screen bounds aren't fully resolved yet.
-		// iPad is especially sensitive: without a launch storyboard or before UIKit settles,
-		// UIScreen bounds can be invalid and UIKit_CreateWindow throws CALayerInvalidGeometry.
+		// --- iOS window strategy ---
+		// Root problem: SDL_CreateWindow on iOS 9 iPad with an explicit position (even 0,0)
+		// causes UIKit to set a CALayer frame that may contain NaN when UIScreen.bounds is
+		// not yet settled.  The resulting CALayerInvalidGeometry NSException propagates
+		// through the SjLj C++ unwinder (armv7 / -fsjlj-exceptions) and hits __cxa_bad_cast
+		// → abort(), with no visible error.
+		//
+		// Fix:
+		//  1. SDL_WINDOWPOS_UNDEFINED — let UIKit own the position completely.
+		//  2. SDL_WINDOW_FULLSCREEN_DESKTOP — SDL does NOT set an explicit CALayer frame;
+		//     UIKit stretches it to the screen automatically.
+		//  3. Wait for valid UIScreen bounds so we have real render dimensions.
+		//  4. Wrap SDL_CreateWindow in @try/@catch to catch CALayerInvalidGeometry
+		//     before it escapes into SjLj territory and causes an unrecoverable abort.
+
+		// Wait up to 3 s for UIScreen to have valid bounds (avoids NaN in UIKit)
 		int displayW = 0;
 		int displayH = 0;
 		iOS_WaitForValidScreenBounds(&displayW, &displayH, 3000);
 
+		// Also ask SDL for the display mode (may be more reliable after SDL_Init)
 		SDL_DisplayMode displayMode;
 		if (SDL_GetCurrentDisplayMode(0, &displayMode) == 0 &&
 			displayMode.w > 0 && displayMode.h > 0)
@@ -74,23 +87,23 @@ void SexyAppBase::MakeWindow()
 			displayH = displayMode.h;
 		}
 
-		Uint32 winFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_FULLSCREEN | SDL_WINDOW_SHOWN;
-		int winX = 0;
-		int winY = 0;
-		int winW = mWidth * IMG_DOWNSCALE;
-		int winH = mHeight * IMG_DOWNSCALE;
-
-		if (displayW > 0 && displayH > 0)
-		{
-			winW = displayW;
-			winH = displayH;
+		// Failsafe
+		if (displayW <= 0 || displayH <= 0) {
+			displayW = 1024;
+			displayH = 768;
 		}
 
-		// Failsafe bounds just in case SexyApp logic is not initialized yet
-		if (winW <= 0 || winH <= 0) {
-			winW = 1024;
-			winH = 768;
-		}
+		// Use FULLSCREEN_DESKTOP: SDL defers the CALayer frame to UIKit entirely.
+		// Do NOT use SDL_WINDOW_FULLSCREEN — it passes explicit w/h to UIKit_CreateWindow
+		// which can produce a NaN CALayer position on iOS 9 before bounds are settled.
+		Uint32 winFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_SHOWN;
+		// UNDEFINED position: never pass 0,0 explicitly on iOS.
+		int winX = SDL_WINDOWPOS_UNDEFINED;
+		int winY = SDL_WINDOWPOS_UNDEFINED;
+		// Pass the display size — SDL will use this as a hint but FULLSCREEN_DESKTOP
+		// overrides it from the screen anyway.
+		int winW = displayW;
+		int winH = displayH;
 #else
 		Uint32 winFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE
 			| (!mIsWindowed ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
@@ -105,7 +118,7 @@ void SexyAppBase::MakeWindow()
 		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
 		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
 
-		mWindow = (void*)SDL_CreateWindow(
+		mWindow = (void*)iOS_CreateWindowSafe(
 			mTitle.c_str(),
 			winX, winY,
 			winW, winH, winFlags);
