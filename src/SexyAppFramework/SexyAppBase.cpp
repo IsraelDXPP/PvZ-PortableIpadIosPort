@@ -49,6 +49,10 @@
 #include <emscripten/html5.h>
 #endif
 
+#ifdef __IPHONEOS__
+#include "ios_platform.h"
+#endif
+
 #include "SexyAppBase.h"
 //#include "misc/SEHCatcher.h"
 #include "widget/WidgetManager.h"
@@ -189,10 +193,12 @@ SexyAppBase::SexyAppBase()
 #elif defined(__IPHONEOS__)
 	// iOS: use Documents directory (visible in Files app via UIFileSharingEnabled)
 	{
-		const char* aHome = std::getenv("HOME");
-		if (aHome != nullptr && aHome[0] != '\0')
+		char aDocsDir[512];
+		if (iOS_GetDocumentsPath(aDocsDir, sizeof(aDocsDir)))
 		{
-			mResourceDir = (fs::path(aHome) / "Documents").generic_string() + "/";
+			mResourceDir = fs::path(aDocsDir).generic_string();
+			if (!mResourceDir.empty() && mResourceDir.back() != '/')
+				mResourceDir += '/';
 		}
 		else
 		{
@@ -1862,6 +1868,8 @@ int SexyAppBase::MsgBox(const std::string& theText, const std::string& theTitle,
 	ErrorApplicationConfig c;
 	errorApplicationCreate(&c, theTitle.c_str(), theText.c_str());
 	errorApplicationShow(&c);
+#elif defined(__IPHONEOS__)
+	iOS_ShowBlockingAlert(theTitle.c_str(), theText.c_str());
 #endif
 
 	EndPopup();
@@ -1885,6 +1893,8 @@ void SexyAppBase::Popup(const std::string& theString)
 	ErrorApplicationConfig c;
 	errorApplicationCreate(&c, "Fatal error", theString.c_str());
 	errorApplicationShow(&c);
+#elif defined(__IPHONEOS__)
+	iOS_ShowBlockingAlert("Fatal Error", theString.c_str());
 #endif
 
 	EndPopup();
@@ -3327,7 +3337,16 @@ void SexyAppBase::Init()
 		SetResourceFolder(mResourceDir);
 	}
 
-	gPakInterface->AddPakFile(GetResourcePath("main.pak"));
+	if (!gPakInterface->AddPakFile(GetResourcePath("main.pak")))
+	{
+#if defined(__IPHONEOS__)
+		iOS_ShowBlockingAlert(
+			"Resources Not Found",
+			"Could not open main.pak in the PvZ Portable Documents folder.");
+#endif
+		mShutdown = true;
+		return;
+	}
 
 	InitPropertiesHook();
 
@@ -3341,10 +3360,13 @@ void SexyAppBase::Init()
 	}
 #elif defined(__IPHONEOS__)
 	{
-		const char* aHome = std::getenv("HOME");
-		if (aHome != nullptr && aHome[0] != '\0')
+		char aDocsDir[512];
+		if (iOS_GetDocumentsPath(aDocsDir, sizeof(aDocsDir)))
 		{
-			SetAppDataFolder((fs::path(aHome) / "Documents").generic_string() + "/");
+			std::string dir = fs::path(aDocsDir).generic_string();
+			if (!dir.empty() && dir.back() != '/')
+				dir += '/';
+			SetAppDataFolder(dir);
 		}
 	}
 #elif defined(__EMSCRIPTEN__)
@@ -3412,6 +3434,11 @@ void SexyAppBase::Init()
 	if (mGLInterface == nullptr)
 	{
 		fprintf(stderr, "FATAL: Failed to create OpenGL interface.\n");
+#ifdef __IPHONEOS__
+		iOS_ShowBlockingAlert(
+			"Graphics Error",
+			"Failed to create the OpenGL display. The game cannot start.");
+#endif
 		mShutdown = true;
 		return;
 	}

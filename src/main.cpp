@@ -23,6 +23,8 @@
 #include "Resources.h"
 #include "Sexy.TodLib/TodStringFile.h"
 #include <cstdlib>
+#include <fstream>
+#include <system_error>
 
 #include <vector>
 using namespace Sexy;
@@ -41,8 +43,7 @@ extern "C" {
 #endif
 
 #ifdef __IPHONEOS__
-#include <SDL.h>
-#include <fstream>
+#include "ios_platform.h"
 extern "C" void install_ios_exception_handler();
 #endif
 
@@ -109,35 +110,39 @@ int main(int argc, char** argv)
 
 #ifdef __IPHONEOS__
 	install_ios_exception_handler();
-	bool aHasGameResources = false;
+
+	char aDocsDir[512];
+	const bool aHasDocsPath = iOS_GetDocumentsPath(aDocsDir, sizeof(aDocsDir));
 	fs::path aDocsPath;
-	const char* aHome = std::getenv("HOME");
-	if (aHome != nullptr && aHome[0] != '\0')
+	bool aHasGameResources = false;
+
+	if (aHasDocsPath)
 	{
-		aDocsPath = fs::path(aHome) / "Documents";
-		aHasGameResources = fs::is_regular_file(aDocsPath / "main.pak") &&
-			fs::is_directory(aDocsPath / "properties");
+		aDocsPath = fs::path(aDocsDir);
+		std::error_code ec;
+		aHasGameResources =
+			fs::is_regular_file(aDocsPath / "main.pak", ec) &&
+			fs::is_directory(aDocsPath / "properties", ec);
 	}
 
 	if (!aHasGameResources)
 	{
-		const fs::path aReadmePath = aDocsPath / "README.txt";
-		if (!aDocsPath.empty() && !fs::exists(aReadmePath))
+		const fs::path aReadmePath = aHasDocsPath ? (aDocsPath / "README.txt") : fs::path();
+		if (aHasDocsPath)
 		{
-			std::ofstream(aReadmePath, std::ios::out | std::ios::trunc)
-				<< "Place your `main.pak` and `properties/` folder here to play the game.\n";
+			std::error_code ec;
+			if (!fs::exists(aReadmePath, ec))
+			{
+				std::ofstream(aReadmePath, std::ios::out | std::ios::trunc)
+					<< "Place your `main.pak` and `properties/` folder here to play the game.\n";
+			}
 		}
 
-		SDL_Init(SDL_INIT_VIDEO);
-		SDL_ShowSimpleMessageBox(
-			SDL_MESSAGEBOX_ERROR,
+		iOS_ShowBlockingAlert(
 			"Resources Not Found",
 			"Please place main.pak and the properties/ folder into the "
 			"PvZ Portable folder using the Files app or Finder/iTunes file sharing.\n\n"
-			"The app will now exit.",
-			NULL
-		);
-		SDL_Quit();
+			"The app will now exit.");
 		return 1;
 	}
 #endif
