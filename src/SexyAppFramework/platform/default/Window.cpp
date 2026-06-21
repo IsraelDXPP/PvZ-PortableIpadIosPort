@@ -118,10 +118,17 @@ void SexyAppBase::MakeWindow()
 		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
 		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
 
+#ifdef __IPHONEOS__
 		mWindow = (void*)iOS_CreateWindowSafe(
 			mTitle.c_str(),
 			winX, winY,
 			winW, winH, winFlags);
+#else
+		mWindow = (void*)SDL_CreateWindow(
+			mTitle.c_str(),
+			winX, winY,
+			winW, winH, winFlags);
+#endif
 
 		if (mWindow)
 			mContext = (void*)SDL_GL_CreateContext((SDL_Window*)mWindow);
