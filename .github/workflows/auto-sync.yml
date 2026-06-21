@@ -34,4 +34,4 @@ jobs:
           git rebase upstream/main
           
       - name: Push changes
-        run: git push origin main --force-with-lease --tags
+        run: git push origin main --force-with-lease
