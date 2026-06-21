@@ -335,6 +335,8 @@ elseif (ANDROID)
 elseif (IOS)
 	target_sources(pvz-portable PRIVATE
 		"${CMAKE_CURRENT_SOURCE_DIR}/src/ios_window.mm"
+		"${CMAKE_CURRENT_SOURCE_DIR}/src/ios_exception_handler.mm"
+		"${CMAKE_CURRENT_SOURCE_DIR}/src/ios_early_crash_handler.mm"
 	)
 	target_link_libraries(pvz-portable PRIVATE
 		"-framework Foundation"
@@ -356,7 +358,6 @@ elseif (IOS)
 		target_sources(pvz-portable PRIVATE 
 			"${CMAKE_CURRENT_SOURCE_DIR}/src/ios_polyfills.c"
 			"${CMAKE_CURRENT_SOURCE_DIR}/src/ios_cxx_polyfills.cpp"
-			"${CMAKE_CURRENT_SOURCE_DIR}/src/ios_exception_handler.mm"
 		)
 	endif()
 
