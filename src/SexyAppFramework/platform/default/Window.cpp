@@ -37,7 +37,7 @@
 using namespace Sexy;
 
 #ifdef __IPHONEOS__
-extern "C" bool iOS_WaitForValidScreenBounds(int* outW, int* outH, int maxWaitMs);
+#include "ios_platform.h"
 #endif
 
 void SexyAppBase::MakeWindow()

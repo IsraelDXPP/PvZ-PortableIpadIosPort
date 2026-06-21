@@ -1,8 +1,96 @@
 #import <UIKit/UIKit.h>
 
+#include "ios_platform.h"
+
 #include <SDL.h>
 
 #include <cmath>
+#include <cstring>
+
+@interface PvzAlertDelegate : NSObject<UIAlertViewDelegate>
+@property (nonatomic, assign) BOOL dismissed;
+@end
+
+@implementation PvzAlertDelegate
+
+- (void)alertView:(UIAlertView*)alertView clickedButtonAtIndex:(NSInteger)buttonIndex
+{
+	(void)alertView;
+	(void)buttonIndex;
+	self.dismissed = YES;
+}
+
+- (void)alertView:(UIAlertView*)alertView didDismissWithButtonIndex:(NSInteger)buttonIndex
+{
+	(void)alertView;
+	(void)buttonIndex;
+	self.dismissed = YES;
+}
+
+@end
+
+static void iOS_ShowBlockingAlertOnMainThread(const char* title, const char* message)
+{
+	@autoreleasepool {
+		PvzAlertDelegate* delegate = [[PvzAlertDelegate alloc] init];
+		delegate.dismissed = NO;
+
+		NSString* nsTitle = title ? [NSString stringWithUTF8String:title] : @"PvZ Portable";
+		NSString* nsMessage = message ? [NSString stringWithUTF8String:message] : @"";
+
+		UIAlertView* alert = [[UIAlertView alloc] initWithTitle:nsTitle
+		                                                message:nsMessage
+		                                               delegate:delegate
+		                                      cancelButtonTitle:@"OK"
+		                                      otherButtonTitles:nil];
+		[alert show];
+
+		while (!delegate.dismissed)
+		{
+			[[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+			                         beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+		}
+	}
+}
+
+extern "C" bool iOS_GetDocumentsPath(char* outPath, size_t outPathSize)
+{
+	if (outPath == nullptr || outPathSize == 0)
+		return false;
+
+	outPath[0] = '\0';
+
+	@autoreleasepool {
+		NSArray* paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+		if (paths.count == 0)
+			return false;
+
+		NSString* docs = paths[0];
+		if (docs.length == 0)
+			return false;
+
+		const char* utf8 = docs.UTF8String;
+		if (utf8 == nullptr || utf8[0] == '\0')
+			return false;
+
+		strncpy(outPath, utf8, outPathSize - 1);
+		outPath[outPathSize - 1] = '\0';
+		return true;
+	}
+}
+
+extern "C" void iOS_ShowBlockingAlert(const char* title, const char* message)
+{
+	if ([NSThread isMainThread])
+	{
+		iOS_ShowBlockingAlertOnMainThread(title, message);
+		return;
+	}
+
+	dispatch_sync(dispatch_get_main_queue(), ^{
+		iOS_ShowBlockingAlertOnMainThread(title, message);
+	});
+}
 
 extern "C" bool iOS_WaitForValidScreenBounds(int* outW, int* outH, int maxWaitMs)
 {
