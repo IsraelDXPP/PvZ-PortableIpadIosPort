@@ -36,6 +36,10 @@
 
 using namespace Sexy;
 
+#ifdef __IPHONEOS__
+extern "C" bool iOS_WaitForValidScreenBounds(int* outW, int* outH, int maxWaitMs);
+#endif
+
 void SexyAppBase::MakeWindow()
 {
 	if (mWindow)
@@ -56,12 +60,32 @@ void SexyAppBase::MakeWindow()
 #ifdef __IPHONEOS__
 		// On iOS, explicit dimensions and 0,0 position to avoid CALayer NaN exceptions
 		// on older iOS versions (iOS 9) when screen bounds aren't fully resolved yet.
+		// iPad is especially sensitive: without a launch storyboard or before UIKit settles,
+		// UIScreen bounds can be invalid and UIKit_CreateWindow throws CALayerInvalidGeometry.
+		int displayW = 0;
+		int displayH = 0;
+		iOS_WaitForValidScreenBounds(&displayW, &displayH, 3000);
+
+		SDL_DisplayMode displayMode;
+		if (SDL_GetCurrentDisplayMode(0, &displayMode) == 0 &&
+			displayMode.w > 0 && displayMode.h > 0)
+		{
+			displayW = displayMode.w;
+			displayH = displayMode.h;
+		}
+
 		Uint32 winFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_FULLSCREEN | SDL_WINDOW_SHOWN;
 		int winX = 0;
 		int winY = 0;
 		int winW = mWidth * IMG_DOWNSCALE;
 		int winH = mHeight * IMG_DOWNSCALE;
-		
+
+		if (displayW > 0 && displayH > 0)
+		{
+			winW = displayW;
+			winH = displayH;
+		}
+
 		// Failsafe bounds just in case SexyApp logic is not initialized yet
 		if (winW <= 0 || winH <= 0) {
 			winW = 1024;
