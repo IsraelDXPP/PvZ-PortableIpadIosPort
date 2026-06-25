@@ -373,11 +373,11 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
         UIWindow* kw = [UIApplication sharedApplication].keyWindow;
         if (kw) {
             const char* orStr = "?";
-            UIInterfaceOrientation or = [UIApplication sharedApplication].statusBarOrientation;
-            if (or == UIInterfaceOrientationLandscapeLeft) orStr = "LL";
-            else if (or == UIInterfaceOrientationLandscapeRight) orStr = "LR";
-            else if (or == UIInterfaceOrientationPortrait) orStr = "P";
-            else if (or == UIInterfaceOrientationPortraitUpsideDown) orStr = "PD";
+            UIInterfaceOrientation orientVal = [UIApplication sharedApplication].statusBarOrientation;
+            if (orientVal == UIInterfaceOrientationLandscapeLeft) orStr = "LL";
+            else if (orientVal == UIInterfaceOrientationLandscapeRight) orStr = "LR";
+            else if (orientVal == UIInterfaceOrientationPortrait) orStr = "P";
+            else if (orientVal == UIInterfaceOrientationPortraitUpsideDown) orStr = "PD";
 
             char buf[256];
             snprintf(buf, sizeof(buf),
