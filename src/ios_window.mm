@@ -272,29 +272,46 @@ extern "C" SDL_Window* iOS_CreateWindowSafe(
     // NSException and the window is set up correctly.
     iOS_SwizzleSetPosition();
 
-    // Phase 1: Force screen initialization and pre-rotation.
+    // Phase 1: Force the UIScreen to initialise its bounds.
     //
-    // On iOS 9 at boot, [UIScreen mainScreen].bounds returns (0,0,0,0)
-    // until the first UIWindow is made key & visible.  We create a temp
-    // window with an EXPLICIT landscape frame (1024x768) to force the
-    // system to initialise the screen geometry *before* SDL touches it.
+    // On iOS 9 at boot, [UIScreen mainScreen].bounds can return (0,0,0,0)
+    // because the screen hasn't finished setting up yet.  We poke several
+    // UIScreen properties and create a temp UIWindow with an explicit
+    // landscape frame to wake up the screen plumbing BEFORE SDL touches it.
     @try {
         iOS_WriteLog("SDL_WINDOW_INIT", "forcing screen init + landscape prerotate...");
 
+        // Poke UIScreen properties that may force screen initialisation.
+        UIScreen* scr = [UIScreen mainScreen];
+        (void)scr.availableModes;
+        (void)scr.currentMode;
+        (void)scr.coordinateSpace;
+
+        // Create a temp window with an explicit landscape frame.  We avoid
+        // [UIScreen mainScreen].bounds here because it's still (0,0,0,0).
+        // makeKeyAndVisible forces the system to initialise the screen;
+        // after this call scr.bounds should report valid dimensions.
         UIWindow* preWin = [[UIWindow alloc] initWithFrame:CGRectMake(0, 0, 1024, 768)];
         preWin.rootViewController = [[SDL_PrerotateVC alloc] init];
         [preWin makeKeyAndVisible];
 
-        // Let the run loop settle so the screen bounds are updated.
+        // Let the run loop settle.
         [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.5]];
 
         // Verify screen is now valid
-        CGRect sb = [UIScreen mainScreen].bounds;
+        CGRect sb = scr.bounds;
         if (sb.size.width < 1 || sb.size.height < 1) {
-            char buf[128];
-            snprintf(buf, sizeof(buf), "screen still invalid after prerotate: %.0fx%.0f",
-                     sb.size.width, sb.size.height);
+            char buf[196];
+            snprintf(buf, sizeof(buf),
+                     "screen STILL invalid after prerotate: bounds=%.0fx%.0f "
+                     "nativeBounds=%.0fx%.0f currentMode=%s",
+                     sb.size.width, sb.size.height,
+                     scr.nativeBounds.size.width, scr.nativeBounds.size.height,
+                     scr.currentMode ? "Y" : "N");
             iOS_WriteLog("SDL_WINDOW_INIT", buf);
+            // Last resort: try using nativeBounds
+            sb = scr.nativeBounds;
+            iOS_WriteLog("SDL_WINDOW_INIT", sb.size.width > 0 ? "nativeBounds OK, using it" : "nativeBounds also 0");
         }
 
         preWin.hidden = YES;
@@ -436,6 +453,33 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
         // On exception, leave swizzle state as-is (retries may need it)
         return nullptr;
     }
+}
+
+/// Defer the game's entry-point function so it runs after
+/// applicationDidBecomeActive:, ensuring [UIScreen mainScreen].bounds
+/// returns valid dimensions when SDL_CreateWindow runs.
+///
+/// Must be called from the main thread.
+extern "C" int iOS_RunGameAfterActivation(int (*runGameFn)(int, char**), int argc, char** argv)
+{
+    __block int exitCode = 0;
+    __block BOOL done = NO;
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        exitCode = runGameFn(argc, argv);
+        done = YES;
+    });
+
+    // Spin the run loop until the game exits.  The dispatch block above runs
+    // after the app becomes active and the main run loop starts processing.
+    while (!done) {
+        @autoreleasepool {
+            [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                                    beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+        }
+    }
+
+    return exitCode;
 }
 
 /// Top-level @try/@catch wrapper for the game's entry-point function.
