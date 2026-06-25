@@ -10,6 +10,19 @@
 #include <stdio.h>
 
 // ---------------------------------------------------------------------------
+// Temporary view controller used to pre-rotate the device to landscape
+// BEFORE SDL creates its own window (avoiding orientation-transition NaN).
+// ---------------------------------------------------------------------------
+@interface SDL_PrerotateVC : UIViewController
+@end
+@implementation SDL_PrerotateVC
+- (NSUInteger)supportedInterfaceOrientations
+{
+    return UIInterfaceOrientationMaskLandscape;
+}
+@end
+
+// ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
@@ -198,7 +211,34 @@ extern "C" bool iOS_WaitForValidScreenBounds(int* outW, int* outH, int maxWaitMs
 extern "C" SDL_Window* iOS_CreateWindowSafe(
     const char* title, int x, int y, int w, int h, Uint32 flags)
 {
-    // Strategy 1: normal SDL_CreateWindow
+    // Phase 0: Pre-rotation — force the device into landscape BEFORE SDL
+    // creates its window.  On iOS 9 at boot the device is in portrait; if
+    // SDL's makeKeyAndVisible is the FIRST rotation, the transition can
+    // produce "CALayer position contains NaN: [0 nan]".
+    @try {
+        iOS_WriteLog("SDL_WINDOW_INIT", "prerotating to landscape...");
+
+        UIWindow* preWin = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
+        preWin.rootViewController = [[SDL_PrerotateVC alloc] init];
+
+        // This triggers the system to evaluate supported orientations:
+        // since our VC only allows landscape, the system rotates the device
+        // now (before SDL is involved), settling into a stable state.
+        [preWin makeKeyAndVisible];
+
+        // Give the run loop time to complete the rotation animation.
+        [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.5]];
+
+        // Tear down the temp window so SDL starts fresh.
+        preWin.hidden = YES;
+        preWin.rootViewController = nil;
+    }
+    @catch (NSException* ex) {
+        iOS_WriteLog("SDL_PREROTATE_FAIL",
+            ex.reason.UTF8String ? ex.reason.UTF8String : "unknown");
+    }
+
+    // Strategy 1: normal SDL_CreateWindow (now in stable landscape)
     @try {
         SDL_Window* result = SDL_CreateWindow(title, x, y, w, h, flags);
         if (result) return result;
