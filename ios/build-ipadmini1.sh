@@ -57,27 +57,6 @@ fi
 
 mkdir -p "$BUILD_DIR"
 
-# Locate Xcode 14.x (or any Xcode) with armv7 compiler-rt for SjLj support
-CLANG_RT_ARMV7=""
-# Search Xcode installations for armv7-compatible libclang_rt.ios.a
-for XCODE_VER in 14.3.1 14.3 14.2 14.1 14; do
-    CLANG_RT=$(find "/Applications/Xcode_${XCODE_VER}.app" -name "libclang_rt.ios.a" 2>/dev/null | head -1)
-    if [ -n "$CLANG_RT" ]; then
-        echo "Found libclang_rt.ios.a at: $CLANG_RT"
-        EXTRACTED="/tmp/libclang_rt_armv7.a"
-        # Extract armv7 slice (the only slice that matters for iPad mini 1)
-        lipo -extract armv7 "$CLANG_RT" -output "$EXTRACTED" 2>/dev/null || cp "$CLANG_RT" "$EXTRACTED"
-        CLANG_RT_ARMV7="$EXTRACTED"
-        echo "Extracted armv7 SjLj runtime to: $EXTRACTED"
-        break
-    fi
-done
-if [ -z "$CLANG_RT_ARMV7" ]; then
-    echo "WARNING: Could not find Xcode with armv7 libclang_rt.ios.a"
-    echo "         SjLj exception symbols may be missing at runtime."
-    echo "         Install Xcode 14.x to fix this, or extract libclang_rt.ios.a manually."
-fi
-
 echo "--- Configuring CMake for armv7 iOS ---"
 cmake -B "$BUILD_DIR/game" -S "$PROJECT_ROOT" \
     -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
@@ -89,8 +68,6 @@ cmake -B "$BUILD_DIR/game" -S "$PROJECT_ROOT" \
     $SYSROOT_ARG \
     -DIOS_IPADMINI1=ON \
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-    -DCMAKE_EXE_LINKER_FLAGS="-Wl,-ld_classic -Wl,-w${CLANG_RT_ARMV7:+ $CLANG_RT_ARMV7}" \
-    -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-ld_classic -Wl,-w" \
     -G Ninja
 
 echo "--- Building ---"

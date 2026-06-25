@@ -351,8 +351,6 @@ elseif (IOS)
 	)
 
 	if(IOS_IPADMINI1)
-		# Enable SjLj exceptions to prevent iOS 9 unwinder crashes (doesn't fully fix Obj-C interop though)
-		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsjlj-exceptions")
 		target_link_options(pvz-portable PRIVATE "-F${CMAKE_CURRENT_SOURCE_DIR}/dummy_frameworks" "-lobjc" "-Wl,-undefined,dynamic_lookup")
 		target_sources(pvz-portable PRIVATE 
 			"${CMAKE_CURRENT_SOURCE_DIR}/src/ios_polyfills.c"

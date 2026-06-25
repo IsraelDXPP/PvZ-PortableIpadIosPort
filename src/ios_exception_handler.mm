@@ -32,6 +32,6 @@ void iOSUncaughtExceptionHandler(NSException *exception) {
     iOS_ShowBlockingAlert("Fatal Exception", reason.UTF8String ? reason.UTF8String : "Unknown error");
 }
 
-extern "C" void install_ios_exception_handler() {
+void install_ios_exception_handler() {
     NSSetUncaughtExceptionHandler(&iOSUncaughtExceptionHandler);
 }

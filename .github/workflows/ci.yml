@@ -471,31 +471,6 @@ jobs:
       with:
         vcpkgJsonGlob: vcpkg.json
 
-    - name: Extract armv7 libclang_rt from Xcode 14
-      run: |
-        # Xcode 14.x still has armv7 support in libclang_rt.ios.a.
-        # We extract just the armv7 slice so the real SjLj exception
-        # handling routines (Unwind_SjLj_Register, gxx_personality_sj0, etc.)
-        # are available at link time — and therefore on the device too.
-        CLANG_RT=$(find /Applications/Xcode_14.3.1.app \
-          -name "libclang_rt.ios.a" 2>/dev/null | head -1)
-        if [ -z "$CLANG_RT" ]; then
-          echo "Xcode 14.3.1 not found, searching other versions..."
-          CLANG_RT=$(find /Applications -path '*/Xcode_14*' \
-            -name "libclang_rt.ios.a" 2>/dev/null | head -1)
-        fi
-        if [ -n "$CLANG_RT" ]; then
-          echo "Found libclang_rt.ios.a at: $CLANG_RT"
-          lipo -info "$CLANG_RT" || true
-          lipo -extract armv7 "$CLANG_RT" -output /tmp/libclang_rt_armv7.a 2>/dev/null \
-            || cp "$CLANG_RT" /tmp/libclang_rt_armv7.a
-          echo "CLANG_RT_ARMV7=/tmp/libclang_rt_armv7.a" >> $GITHUB_ENV
-          echo "Extracted armv7 libclang_rt successfully."
-        else
-          echo "WARNING: Xcode 14 libclang_rt not found — SjLj stubs will remain."
-          echo "CLANG_RT_ARMV7=" >> $GITHUB_ENV
-        fi
-
     - name: Build PvZ-Portable for iPad mini 1 (armv7, iOS 9.0)
       run: |
         BUILD_DIR=build-ios-ipadmini1
@@ -511,8 +486,6 @@ jobs:
           -DCMAKE_OSX_SYSROOT="$IOS10_SYSROOT" \
           -DIOS_IPADMINI1=ON \
           -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_EXE_LINKER_FLAGS="-Wl,-ld_classic -Wl,-w${CLANG_RT_ARMV7:+ $CLANG_RT_ARMV7}" \
-          -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-ld_classic -Wl,-w" \
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
           -G Ninja
