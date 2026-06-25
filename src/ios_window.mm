@@ -188,78 +188,43 @@ extern "C" bool iOS_WaitForValidScreenBounds(int* outW, int* outH, int maxWaitMs
     return false;
 }
 
-/// Pre-creates a UIWindow with a valid frame to stabilize screen geometry
-/// before SDL creates its own window.  On iOS 9, the screen bounds can
-/// temporarily produce NaN during orientation transitions; this gives UIKit
-/// a chance to settle.
-static void iOS_StabilizeScreen()
-{
-    @autoreleasepool {
-        // Force the orientation to landscape so SDL gets consistent metrics
-        UIApplication* app = [UIApplication sharedApplication];
-        if (app.statusBarOrientation != UIInterfaceOrientationLandscapeLeft &&
-            app.statusBarOrientation != UIInterfaceOrientationLandscapeRight)
-        {
-            [app setStatusBarOrientation:UIInterfaceOrientationLandscapeLeft animated:NO];
-        }
-
-        // Create a temporary fullscreen window to force UIKit to settle
-        UIWindow* tmp = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
-        tmp.hidden = NO;
-        // Let a single run loop cycle process the orientation change
-        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
-                                beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
-        tmp.hidden = YES;
-    }
-}
-
 /// Safe wrapper around SDL_CreateWindow for iOS.
 /// Uses ObjC @try/@catch to prevent CALayerInvalidGeometry (and any other
 /// UIKit NSException).
 ///
-/// Retries with different strategies if the initial attempt fails:
+/// Strategies:
 ///   1. Normal SDL_CreateWindow
-///   2. Force landscape orientation + create temp window, retry
-///   3. Wait and retry one more time
+///   2. Create a manual UIWindow with Landscape frame and use SDL_CreateWindowFrom
 extern "C" SDL_Window* iOS_CreateWindowSafe(
     const char* title, int x, int y, int w, int h, Uint32 flags)
 {
-    const int kMaxAttempts = 3;
+    // Strategy 1: normal SDL_CreateWindow
+    @try {
+        SDL_Window* result = SDL_CreateWindow(title, x, y, w, h, flags);
+        if (result) return result;
+    }
+    @catch (NSException* ex) {
+        iOS_WriteLog("SDL_CREATE_WINDOW_FAIL",
+            ex.reason.UTF8String ? ex.reason.UTF8String : "unknown");
+    }
 
-    for (int attempt = 0; attempt < kMaxAttempts; attempt++)
-    {
-        __block SDL_Window* result = nullptr;
-        __block bool caught = false;
-
-        if (attempt == 1)
-        {
-            // Second attempt: force landscape + create temp UIWindow to stabilize
-            iOS_WriteLog("SDL_WINDOW_RETRY", "stabilizing screen orientation...");
-            iOS_StabilizeScreen();
-        }
-        else if (attempt == 2)
-        {
-            // Last attempt: wait a bit more and try with a forced size
-            iOS_WriteLog("SDL_WINDOW_RETRY", "waiting 1s before final attempt...");
-            SDL_Delay(1000);
-            SDL_PumpEvents();
-        }
-
-        @try {
-            result = SDL_CreateWindow(title, x, y, w, h, flags);
-        }
-        @catch (NSException* ex) {
-            caught = true;
-            const char* reason = ex.reason.UTF8String ? ex.reason.UTF8String : "unknown";
-            iOS_WriteLog("SDL_CREATE_WINDOW_FAIL", reason);
-        }
-
-        if (result && !caught)
-        {
-            if (attempt > 0)
-                iOS_WriteLog("SDL_WINDOW_RETRY", "window created OK on retry");
+    // Strategy 2: create a manual UIWindow with explicit Landscape frame
+    // and wrap it with SDL_CreateWindowFrom, bypassing SDL's own (broken)
+    // window creation on iOS 9.
+    iOS_WriteLog("SDL_WINDOW_RETRY", "trying SDL_CreateWindowFrom with manual UIWindow...");
+    @try {
+        UIWindow* uiWindow = [[UIWindow alloc] initWithFrame:CGRectMake(0, 0, 1024, 768)];
+        uiWindow.hidden = NO;
+        SDL_Window* result = SDL_CreateWindowFrom((__bridge void*)uiWindow);
+        if (result) {
+            iOS_WriteLog("SDL_WINDOW_RETRY", "SDL_CreateWindowFrom OK");
             return result;
         }
+        iOS_WriteLog("SDL_WINDOW_RETRY", "SDL_CreateWindowFrom returned null");
+    }
+    @catch (NSException* ex) {
+        iOS_WriteLog("SDL_WINDOW_RETRY",
+            ex.reason.UTF8String ? ex.reason.UTF8String : "unknown");
     }
 
     iOS_WriteLog("SDL_WINDOW_RETRY", "all attempts failed");
