@@ -188,48 +188,82 @@ extern "C" bool iOS_WaitForValidScreenBounds(int* outW, int* outH, int maxWaitMs
     return false;
 }
 
+/// Pre-creates a UIWindow with a valid frame to stabilize screen geometry
+/// before SDL creates its own window.  On iOS 9, the screen bounds can
+/// temporarily produce NaN during orientation transitions; this gives UIKit
+/// a chance to settle.
+static void iOS_StabilizeScreen()
+{
+    @autoreleasepool {
+        // Force the orientation to landscape so SDL gets consistent metrics
+        UIApplication* app = [UIApplication sharedApplication];
+        if (app.statusBarOrientation != UIInterfaceOrientationLandscapeLeft &&
+            app.statusBarOrientation != UIInterfaceOrientationLandscapeRight)
+        {
+            [app setStatusBarOrientation:UIInterfaceOrientationLandscapeLeft animated:NO];
+        }
+
+        // Create a temporary fullscreen window to force UIKit to settle
+        UIWindow* tmp = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
+        tmp.hidden = NO;
+        // Let a single run loop cycle process the orientation change
+        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                                beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+        tmp.hidden = YES;
+    }
+}
+
 /// Safe wrapper around SDL_CreateWindow for iOS.
 /// Uses ObjC @try/@catch to prevent CALayerInvalidGeometry (and any other
-/// UIKit NSException) from escaping into the SjLj C++ unwinder where it
-/// would hit __cxa_bad_cast and cause an unrecoverable abort().
+/// UIKit NSException).
 ///
-/// If the exception is caught, the function logs it and returns NULL so the
-/// caller can show a user-facing error instead of crashing silently.
+/// Retries with different strategies if the initial attempt fails:
+///   1. Normal SDL_CreateWindow
+///   2. Force landscape orientation + create temp window, retry
+///   3. Wait and retry one more time
 extern "C" SDL_Window* iOS_CreateWindowSafe(
     const char* title, int x, int y, int w, int h, Uint32 flags)
 {
-    __block SDL_Window* result = nullptr;
-    __block NSException* caught = nullptr;
+    const int kMaxAttempts = 3;
 
-    @try {
-        result = SDL_CreateWindow(title, x, y, w, h, flags);
-    }
-    @catch (NSException* ex) {
-        caught = ex;
-        result = nullptr;
-    }
+    for (int attempt = 0; attempt < kMaxAttempts; attempt++)
+    {
+        __block SDL_Window* result = nullptr;
+        __block bool caught = false;
 
-    if (caught) {
-        const char* reason = caught.reason.UTF8String ? caught.reason.UTF8String : "unknown";
-        iOS_WriteLog("SDL_CREATE_WINDOW_FAIL", reason);
-        // Try again with the most conservative possible settings:
-        // 1 px + FULLSCREEN_DESKTOP so UIKit owns everything.
+        if (attempt == 1)
+        {
+            // Second attempt: force landscape + create temp UIWindow to stabilize
+            iOS_WriteLog("SDL_WINDOW_RETRY", "stabilizing screen orientation...");
+            iOS_StabilizeScreen();
+        }
+        else if (attempt == 2)
+        {
+            // Last attempt: wait a bit more and try with a forced size
+            iOS_WriteLog("SDL_WINDOW_RETRY", "waiting 1s before final attempt...");
+            SDL_Delay(1000);
+            SDL_PumpEvents();
+        }
+
         @try {
-            Uint32 safeFlags = (flags & ~SDL_WINDOW_FULLSCREEN) | SDL_WINDOW_FULLSCREEN_DESKTOP;
-            result = SDL_CreateWindow(title,
-                SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-                1, 1, safeFlags);
+            result = SDL_CreateWindow(title, x, y, w, h, flags);
         }
-        @catch (NSException*) {
-            result = nullptr;
+        @catch (NSException* ex) {
+            caught = true;
+            const char* reason = ex.reason.UTF8String ? ex.reason.UTF8String : "unknown";
+            iOS_WriteLog("SDL_CREATE_WINDOW_FAIL", reason);
         }
-        if (result)
-            iOS_WriteLog("SDL_CREATE_WINDOW_RETRY", "fallback window created OK");
-        else
-            iOS_WriteLog("SDL_CREATE_WINDOW_RETRY", "fallback window also failed");
+
+        if (result && !caught)
+        {
+            if (attempt > 0)
+                iOS_WriteLog("SDL_WINDOW_RETRY", "window created OK on retry");
+            return result;
+        }
     }
 
-    return result;
+    iOS_WriteLog("SDL_WINDOW_RETRY", "all attempts failed");
+    return nullptr;
 }
 
 /// Safe wrapper around SDL_GL_CreateContext for iOS.
