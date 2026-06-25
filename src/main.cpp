@@ -46,7 +46,6 @@ extern "C" {
 #include "ios_platform.h"
 #include <SDL_hints.h>
 extern void install_ios_exception_handler();
-extern "C" int iOS_RunGameAfterActivation(int (*)(int, char**), int, char**);
 #endif
 
 #ifdef __EMSCRIPTEN__
@@ -186,11 +185,7 @@ static int ios_entry_point(int argc, char** argv)
 		return 1;
 	}
 
-	// Defer run_game() to the main queue.  This lets
-	// applicationDidFinishLaunchingWithOptions: return so that
-	// applicationDidBecomeActive: fires, making [UIScreen mainScreen].bounds
-	// return valid dimensions when SDL_CreateWindow runs inside run_game().
-	return iOS_RunGameAfterActivation(run_game, argc, argv);
+	return run_game(argc, argv);
 }
 #endif
 
