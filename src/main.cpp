@@ -44,6 +44,7 @@ extern "C" {
 
 #ifdef __IPHONEOS__
 #include "ios_platform.h"
+#include <SDL_hints.h>
 extern void install_ios_exception_handler();
 #endif
 
@@ -124,6 +125,13 @@ static int run_game(int argc, char** argv)
 static int ios_entry_point(int argc, char** argv)
 {
 	install_ios_exception_handler();
+
+	// Permitir que el sistema arranque en cualquier orientación (Info.plist tiene
+	// las 4), pero SDL solo considerará LandscapeLeft/LandscapeRight.
+	// Esto evita que UIKit produzca geometría inconsistente durante la transición
+	// de orientación al arrancar en portrait con una app landscape-only, lo que
+	// disparaba "CALayer position contains NaN: [0 nan]" en iPad Mini 1 (iOS 9).
+	SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
 
 	char aDocsDir[512];
 	const bool aHasDocsPath = iOS_GetDocumentsPath(aDocsDir, sizeof(aDocsDir));
