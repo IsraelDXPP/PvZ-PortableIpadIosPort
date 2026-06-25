@@ -311,8 +311,10 @@ extern "C" SDL_Window* iOS_CreateWindowSafe(
                 keyWin.frame = CGRectMake(0, 0, 1024, 768);
                 [keyWin layoutIfNeeded];
             }
-            iOS_UnswizzleSetPosition();
             iOS_WriteLog("SDL_WINDOW_OK", "window created successfully");
+            // Keep the swizzle active — the caller will call
+            // iOS_CreateGLContextSafe next, which may also trigger NaN during
+            // setSDLWindow: / layoutSubviews.
             return result;
         }
     }
@@ -331,7 +333,6 @@ extern "C" SDL_Window* iOS_CreateWindowSafe(
         SDL_Window* result = SDL_CreateWindowFrom((__bridge void*)uiWindow);
         if (result) {
             iOS_WriteLog("SDL_WINDOW_RETRY", "SDL_CreateWindowFrom OK");
-            iOS_UnswizzleSetPosition();
             return result;
         }
         iOS_WriteLog("SDL_WINDOW_RETRY", "SDL_CreateWindowFrom returned null");
@@ -341,22 +342,52 @@ extern "C" SDL_Window* iOS_CreateWindowSafe(
             ex.reason.UTF8String ? ex.reason.UTF8String : "unknown");
     }
 
+    // If we reach here, no strategy worked — unswizzle and bail.
     iOS_UnswizzleSetPosition();
     iOS_WriteLog("SDL_WINDOW_RETRY", "all attempts failed");
     return nullptr;
 }
 
 /// Safe wrapper around SDL_GL_CreateContext for iOS.
-/// Uses ObjC @try/@catch to prevent any UIKit NSException from escaping
-/// into the SjLj C++ unwinder.
+///
+/// Continues the NaN-suppression swizzle started by iOS_CreateWindowSafe
+/// so that setSDLWindow: / layoutSubviews inside GL context creation don't
+/// trigger a CALayerInvalidGeometry exception on iOS 9.
+///
+/// Returns the context, or nullptr on failure (with SDL_GetError() logged).
 extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
 {
     @try {
-        return SDL_GL_CreateContext(window);
+        // The swizzle may have been left active by iOS_CreateWindowSafe,
+        // or it may have been unswizzled and we need to re-install it.
+        BOOL needUnswizzle = !gSwizzleActive;
+        if (needUnswizzle) {
+            iOS_SwizzleSetPosition();
+        }
+
+        SDL_GLContext ctx = SDL_GL_CreateContext(window);
+
+        if (!ctx) {
+            const char* sdlErr = SDL_GetError();
+            iOS_WriteLog("SDL_GL_CREATECONTEXT_FAIL",
+                sdlErr ? sdlErr : "SDL_GL_CreateContext returned NULL");
+            if (needUnswizzle) {
+                iOS_UnswizzleSetPosition();
+            }
+            // If the swizzle was from iOS_CreateWindowSafe, leave it active
+            // for potential retries.
+        } else {
+            if (gSwizzleActive) {
+                iOS_UnswizzleSetPosition();
+            }
+        }
+
+        return ctx;
     }
     @catch (NSException* ex) {
         const char* reason = ex.reason.UTF8String ? ex.reason.UTF8String : "unknown";
-        iOS_WriteLog("SDL_GL_CREATECONTEXT_FAIL", reason);
+        iOS_WriteLog("SDL_GL_CREATECONTEXT_EXCEPTION", reason);
+        // On exception, leave swizzle state as-is (retries may need it)
         return nullptr;
     }
 }
