@@ -130,8 +130,13 @@ void SexyAppBase::MakeWindow()
 			winW, winH, winFlags);
 #endif
 
-		if (mWindow)
+		if (mWindow) {
+#ifdef __IPHONEOS__
+			mContext = (void*)iOS_CreateGLContextSafe((SDL_Window*)mWindow);
+#else
 			mContext = (void*)SDL_GL_CreateContext((SDL_Window*)mWindow);
+#endif
+		}
 
 #if defined(__ANDROID__) || defined(__IPHONEOS__)
 		// EGL/EAGL surface may be transiently unavailable on mobile
@@ -139,7 +144,11 @@ void SexyAppBase::MakeWindow()
 		{
 			SDL_Delay(100);
 			SDL_PumpEvents();
+#ifdef __IPHONEOS__
+			mContext = (void*)iOS_CreateGLContextSafe((SDL_Window*)mWindow);
+#else
 			mContext = (void*)SDL_GL_CreateContext((SDL_Window*)mWindow);
+#endif
 		}
 		if (!mContext)
 		{

@@ -19,6 +19,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <execinfo.h>   // backtrace / backtrace_symbols_fd — async-signal-safe
+#include <exception>    // std::set_terminate
 
 // ---------------------------------------------------------------------------
 // Signal-safe file writer
@@ -117,6 +118,25 @@ const char* pvz_cached_docs_path = nullptr;
 static char pvz_docs_path_buf[1024];
 
 // ---------------------------------------------------------------------------
+// C++ terminate handler — called when a C++ exception escapes without a
+// catch handler (e.g. the __cxa_bad_cast that happens when an ObjC
+// NSException leaks into the SjLj C++ unwinder).  Logs to the crash file
+// and stderr, then lets abort() do its thing.
+// ---------------------------------------------------------------------------
+static void pvz_cxx_terminate()
+{
+    signal_write_str(STDERR_FILENO,
+        "\n[PvZ C++ TERMINATE] Unhandled C++ exception (possibly __cxa_bad_cast from ObjC/SjLj interop)\n");
+
+    int fd = open_crash_log_fd();
+    if (fd >= 0) {
+        signal_write_str(fd,
+            "[PvZ C++ TERMINATE] Unhandled C++ exception (possibly __cxa_bad_cast from ObjC/SjLj interop)\n");
+        close(fd);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Constructor — runs before main() and before most C++ static inits
 // Priority 101 = very early (lower number = earlier; 0-100 reserved by OS)
 // ---------------------------------------------------------------------------
@@ -154,4 +174,14 @@ static void pvz_install_early_crash_handler()
     signal(SIGILL,  pvz_signal_handler);
     signal(SIGFPE,  pvz_signal_handler);
     signal(SIGTRAP, pvz_signal_handler);
+
+    // 4. Install C++ terminate handler to catch unhandled C++ exceptions
+    //    (like __cxa_bad_cast from ObjC/SjLj interop) before they abort().
+    std::set_terminate(pvz_cxx_terminate);
+
+    // 5. Install ObjC uncaught exception handler so NSExceptions that
+    //    escape all @catch blocks are logged instead of silently aborting.
+    //    This must run before UIApplicationMain() to cover early setup.
+    extern void install_ios_exception_handler(void);
+    install_ios_exception_handler();
 }

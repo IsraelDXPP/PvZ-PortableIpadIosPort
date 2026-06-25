@@ -98,17 +98,31 @@ static void BuildUtf8ArgsFromWin32(int& argc, char**& argv)
 }
 #endif
 
-int main(int argc, char** argv)
+// Common game entry shared by all platforms.
+static int run_game(int argc, char** argv)
 {
-#ifdef __3DS__
-	osSetSpeedupEnable(true);
+	TodStringListSetColors(gLawnStringFormats, gLawnStringFormatCount);
+	gGetCurrentLevelName = LawnGetCurrentLevelName;
+	gAppCloseRequest = LawnGetCloseRequest;
+	gAppHasUsedCheatKeys = LawnHasUsedCheatKeys;
+	gExtractResourcesByName = Sexy::ExtractResourcesByName;
+	gLawnApp = new LawnApp();
+	gLawnApp->SetArgs(argc, argv);
+	gLawnApp->Init();
+	gLawnApp->Start();
+#ifndef __EMSCRIPTEN__
+	gLawnApp->Shutdown();
+	if (gLawnApp)
+		delete gLawnApp;
 #endif
-
-#ifdef _WIN32
-	BuildUtf8ArgsFromWin32(argc, argv);
-#endif
+	return 0;
+}
 
 #ifdef __IPHONEOS__
+// iOS entry point that checks resources, then starts the game.
+// Everything runs inside iOS_RunWithExceptionCatch's @try/@catch.
+static int ios_entry_point(int argc, char** argv)
+{
 	install_ios_exception_handler();
 
 	char aDocsDir[512];
@@ -162,22 +176,26 @@ int main(int argc, char** argv)
 			"The app will now exit.");
 		return 1;
 	}
+
+	return run_game(argc, argv);
+}
 #endif
 
-	TodStringListSetColors(gLawnStringFormats, gLawnStringFormatCount);
-	gGetCurrentLevelName = LawnGetCurrentLevelName;
-	gAppCloseRequest = LawnGetCloseRequest;
-	gAppHasUsedCheatKeys = LawnHasUsedCheatKeys;
-	gExtractResourcesByName = Sexy::ExtractResourcesByName;
-	gLawnApp = new LawnApp();
-	gLawnApp->SetArgs(argc, argv);
-	gLawnApp->Init();
-	gLawnApp->Start();
-#ifndef __EMSCRIPTEN__
-	gLawnApp->Shutdown();
-	if (gLawnApp)
-		delete gLawnApp;
+int main(int argc, char** argv)
+{
+#ifdef __3DS__
+	osSetSpeedupEnable(true);
 #endif
 
-	return 0;
+#ifdef _WIN32
+	BuildUtf8ArgsFromWin32(argc, argv);
+#endif
+
+#ifdef __IPHONEOS__
+	// Wrap the entire game lifecycle in @try/@catch to prevent any ObjC
+	// NSException from escaping into the SjLj C++ unwinder.
+	return iOS_RunWithExceptionCatch(ios_entry_point, argc, argv);
+#else
+	return run_game(argc, argv);
+#endif
 };
