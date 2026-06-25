@@ -41,6 +41,11 @@ void* iOS_CreateGLContextSafe(struct SDL_Window* window);
    or 1 if an exception was caught. */
 int iOS_RunWithExceptionCatch(int (*entry)(int, char**), int argc, char** argv);
 
+/* Defer runGameFn until after UIApplication becomes active.  On iOS 9 iPad,
+   UIScreen.bounds is 0×0 inside applicationDidFinishLaunching (where SDL
+   calls main()).  Must be called from the main thread. */
+int iOS_RunGameAfterActivation(int (*runGameFn)(int, char**), int argc, char** argv);
+
 #ifdef __cplusplus
 }
 #endif

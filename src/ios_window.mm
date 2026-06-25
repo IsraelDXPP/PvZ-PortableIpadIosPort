@@ -107,7 +107,47 @@ static BOOL iOS_MeasureScreenSize(CGSize* outSize)
         }
     }
 
+    // Largest mode from availableModes (works before bounds are initialised).
+    CGSize best = {0, 0};
+    for (UIScreenMode* sm in screen.availableModes) {
+        CGSize ms = sm.size;
+        if (ms.width <= 0.0f || ms.height <= 0.0f)
+            continue;
+        if (ms.width * ms.height > best.width * best.height)
+            best = ms;
+    }
+    if (best.width > 0.0f && best.height > 0.0f) {
+        CGFloat scale = screen.scale > 0.0f ? screen.scale : 1.0f;
+        CGSize points = CGSizeMake(best.width / scale, best.height / scale);
+        if (iOS_SizeIsValid(points)) {
+            *outSize = points;
+            gSanitizeFallbackSize = points;
+            return YES;
+        }
+    }
+
     return NO;
+}
+
+/// Block until UIApplicationStateActive (or timeout).
+static void iOS_WaitUntilApplicationActive(int maxWaitMs)
+{
+    const int stepMs = 50;
+    int waited = 0;
+
+    while (waited < maxWaitMs) {
+        @autoreleasepool {
+            UIApplication* app = [UIApplication sharedApplication];
+            if (app && app.applicationState == UIApplicationStateActive) {
+                iOS_WriteLog("IOS_ACTIVE", "UIApplicationStateActive");
+                return;
+            }
+        }
+        iOS_PumpRunLoopMs(stepMs);
+        waited += stepMs;
+    }
+
+    iOS_WriteLog("IOS_ACTIVE", "TIMEOUT waiting for UIApplicationStateActive");
 }
 
 static UIWindow* iOS_GetSDLUIWindow(SDL_Window* window)
@@ -146,6 +186,14 @@ static UIWindow* iOS_FindActiveWindow(SDL_Window* sdlWindow)
 /// UIScreen.bounds on iOS 9 iPad at launch (which produces NaN CALayer frames).
 static SDL_Window* iOS_TryCreateWindowFromUIKit(void)
 {
+    UIScreen* screen = [UIScreen mainScreen];
+    if (screen) {
+        (void)screen.availableModes;
+        (void)screen.currentMode;
+        if ([screen respondsToSelector:@selector(coordinateSpace)])
+            (void)screen.coordinateSpace;
+    }
+
     CGSize size = {0, 0};
     for (int i = 0; i < 100 && !iOS_MeasureScreenSize(&size); i++)
         iOS_PumpRunLoopMs(50);
@@ -549,21 +597,20 @@ extern "C" SDL_Window* iOS_CreateWindowSafe(
 {
     // Install geometry swizzles BEFORE any UIKit / SDL layer manipulation.
     iOS_SwizzleSetPosition();
+
+    // UIScreen is not reliable until the app is active on iOS 9 iPad.
+    iOS_WaitUntilApplicationActive(10000);
     iOS_MeasureScreenSize(&gSanitizeFallbackSize);
 
     SDL_Window* result = nullptr;
-    const CGRect screenBounds = [UIScreen mainScreen].bounds;
 
-    // iOS 9 iPad: UIScreen.bounds is 0×0 here.  SDL_CreateWindow passes that
-    // to UIWindow init → NaN CALayer frames → EAGL drawable fails.
-    // Bootstrap with a UIWindow sized from currentMode, then CreateWindowFrom.
-    if (!iOS_SizeIsValid(screenBounds.size)) {
-        iOS_WriteLog("SDL_WINDOW_INIT", "UIScreen 0x0 — CreateWindowFrom bootstrap");
-        result = iOS_TryCreateWindowFromUIKit();
-    }
+    // Always prefer CreateWindowFrom: SDL_CreateWindow reads UIScreen.bounds
+    // internally and can inherit the 0×0 / NaN geometry seen on iOS 9 iPad.
+    iOS_WriteLog("SDL_WINDOW_INIT", "CreateWindowFrom bootstrap");
+    result = iOS_TryCreateWindowFromUIKit();
 
     if (!result) {
-        iOS_WriteLog("SDL_WINDOW_INIT", "SDL_CreateWindow (geometry swizzles active)");
+        iOS_WriteLog("SDL_WINDOW_INIT", "CreateWindowFrom failed — SDL_CreateWindow fallback");
         @try {
             result = SDL_CreateWindow(title, x, y, w, h, flags);
         }
@@ -689,6 +736,38 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
         iOS_WriteLog("SDL_GL_CREATECONTEXT_EXCEPTION", reason);
         return nullptr;
     }
+}
+
+
+/// Defer the game entry point until after UIApplication becomes active.
+/// SDL runs main() from applicationDidFinishLaunching; UIScreen.bounds on
+/// iOS 9 iPad only becomes valid after applicationDidBecomeActive.
+extern "C" int iOS_RunGameAfterActivation(int (*runGameFn)(int, char**), int argc, char** argv)
+{
+    __block int exitCode = 0;
+    __block BOOL done = NO;
+
+    iOS_WriteLog("IOS_DEFER", "queue run_game after launch returns");
+
+    // Double dispatch_async: the first block runs after didFinishLaunching
+    // returns; the second runs after applicationDidBecomeActive, when
+    // UIScreen.bounds is valid on iOS 9 iPad.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        dispatch_async(dispatch_get_main_queue(), ^{
+            iOS_WriteLog("IOS_DEFER", "run_game starting (post-activation)");
+            exitCode = runGameFn(argc, argv);
+            done = YES;
+        });
+    });
+
+    while (!done) {
+        @autoreleasepool {
+            [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                                    beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+        }
+    }
+
+    return exitCode;
 }
 
 
