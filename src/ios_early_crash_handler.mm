@@ -182,6 +182,6 @@ static void pvz_install_early_crash_handler()
     // 5. Install ObjC uncaught exception handler so NSExceptions that
     //    escape all @catch blocks are logged instead of silently aborting.
     //    This must run before UIApplicationMain() to cover early setup.
-    extern void install_ios_exception_handler(void);
+    extern "C" void install_ios_exception_handler(void);
     install_ios_exception_handler();
 }
