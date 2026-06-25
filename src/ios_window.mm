@@ -315,6 +315,18 @@ extern "C" SDL_Window* iOS_CreateWindowSafe(
             // Keep the swizzle active — the caller will call
             // iOS_CreateGLContextSafe next, which may also trigger NaN during
             // setSDLWindow: / layoutSubviews.
+
+            // Log actual window dimensions for debugging
+            UIWindow* kw2 = [UIApplication sharedApplication].keyWindow;
+            if (kw2) {
+                char buf[128];
+                snprintf(buf, sizeof(buf),
+                    "keyWindow frame after SDL_CW: %.0fx%.0f (screen %.0fx%.0f)",
+                    kw2.bounds.size.width, kw2.bounds.size.height,
+                    [UIScreen mainScreen].bounds.size.width,
+                    [UIScreen mainScreen].bounds.size.height);
+                iOS_WriteLog("SDL_WINDOW_DEBUG", buf);
+            }
             return result;
         }
     }
@@ -358,6 +370,28 @@ extern "C" SDL_Window* iOS_CreateWindowSafe(
 extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
 {
     @try {
+        UIWindow* kw = [UIApplication sharedApplication].keyWindow;
+        if (kw) {
+            const char* orStr = "?";
+            UIInterfaceOrientation or = [UIApplication sharedApplication].statusBarOrientation;
+            if (or == UIInterfaceOrientationLandscapeLeft) orStr = "LL";
+            else if (or == UIInterfaceOrientationLandscapeRight) orStr = "LR";
+            else if (or == UIInterfaceOrientationPortrait) orStr = "P";
+            else if (or == UIInterfaceOrientationPortraitUpsideDown) orStr = "PD";
+
+            char buf[256];
+            snprintf(buf, sizeof(buf),
+                "keyWindow bounds at GL: %.0fx%.0f frame=(%.0f,%.0f,%.0f,%.0f) "
+                "screen=%.0fx%.0f or=%s",
+                kw.bounds.size.width, kw.bounds.size.height,
+                kw.frame.origin.x, kw.frame.origin.y,
+                kw.frame.size.width, kw.frame.size.height,
+                [UIScreen mainScreen].bounds.size.width,
+                [UIScreen mainScreen].bounds.size.height,
+                orStr);
+            iOS_WriteLog("SDL_GL_DEBUG", buf);
+        }
+
         // The swizzle may have been left active by iOS_CreateWindowSafe,
         // or it may have been unswizzled and we need to re-install it.
         BOOL needUnswizzle = !gSwizzleActive;
