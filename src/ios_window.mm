@@ -252,44 +252,29 @@ static void iOS_UnswizzleSetPosition(void)
 extern "C" SDL_Window* iOS_CreateWindowSafe(
     const char* title, int x, int y, int w, int h, Uint32 flags)
 {
-    // Phase 0: Swizzle CALayer.setPosition: to suppress NaN.
+    // --- Phase 0: NaN swizzle ---
+    // Keep CALayer.setPosition: swizzle active throughout window/GL setup to
+    // prevent CALayerInvalidGeometry from escaping into the SjLj unwinder.
     iOS_SwizzleSetPosition();
 
-    // Phase 1: Override the flags to force SDL_WINDOW_HIDDEN.
-    //
-    // On iPad Mini 1 (iOS 9 at boot), [UIScreen mainScreen].bounds returns
-    // (0,0,0,0) and NEVER becomes valid, not even after applicationDidBecomeActive.
-    // SDL creates the UIWindow with zero size, then makeKeyAndVisible triggers
-    // a CoreAnimation layout that divides by zero → NaN → crash.
-    //
-    // By creating the window HIDDEN we skip makeKeyAndVisible.  We then force
-    // the window + root view to explicit landscape dimensions BEFORE showing it.
-    //
-    // The pre-rotation window is NOT used — it cannot fix the zero-bounds
-    // screen, and only delays startup.
-    @try {
-        iOS_WriteLog("SDL_WINDOW_INIT", "creating HIDDEN window to bypass zero-size issue");
-        flags |= SDL_WINDOW_HIDDEN;
-    }
-    @catch (NSException* ex) {
-        iOS_WriteLog("SDL_WINDOW_HIDDEN_FAIL",
-            ex.reason.UTF8String ? ex.reason.UTF8String : "unknown");
-    }
+    // --- Phase 1: Create window HIDDEN ---
+    // On iPad mini 1 (iOS 9) UIScreen.bounds is 0×0 at this point.
+    // Creating the window HIDDEN means SDL skips makeKeyAndVisible, which
+    // prevents the "divide-by-zero → NaN CALayer" crash during first layout.
+    Uint32 hiddenFlags = (flags | SDL_WINDOW_HIDDEN) & ~SDL_WINDOW_SHOWN;
 
-    // Phase 2: Create the SDL window WITHOUT makeKeyAndVisible.
     SDL_Window* result = nullptr;
     @try {
-        result = SDL_CreateWindow(title, x, y, w, h, flags);
-        if (result) {
+        iOS_WriteLog("SDL_WINDOW_INIT", "creating HIDDEN window to bypass zero-size issue");
+        result = SDL_CreateWindow(title, x, y, w, h, hiddenFlags);
+        if (result)
             iOS_WriteLog("SDL_WINDOW_OK", "SDL window created (HIDDEN)");
-        } else {
-            iOS_WriteLog("SDL_CREATE_WINDOW_FAIL",
-                SDL_GetError() ? SDL_GetError() : "unknown");
-        }
+        else
+            iOS_WriteLog("SDL_CREATE_WINDOW_FAIL", SDL_GetError() ?: "null");
     }
     @catch (NSException* ex) {
         iOS_WriteLog("SDL_CREATE_WINDOW_EXCEPTION",
-            ex.reason.UTF8String ? ex.reason.UTF8String : "unknown");
+            ex.reason.UTF8String ?: "unknown");
     }
 
     if (!result) {
@@ -297,65 +282,71 @@ extern "C" SDL_Window* iOS_CreateWindowSafe(
         return nullptr;
     }
 
-    // Phase 3: Force the window + root view hierarchy to landscape size.
+    // --- Phase 2: Force valid frame on all UIWindows before show ---
     //
-    // SDL created the UIWindow with [UIScreen mainScreen].bounds = 0×0, so
-    // the window and all its views have zero size.  We fix this by explicitly
-    // sizing them up before the window becomes visible.
+    // At this point keyWindow may still be nil (because we used HIDDEN).
+    // We iterate ALL windows and force 1024×768 (iPad mini 1 landscape).
+    //
+    // Why hardcode 1024×768?  Because UIScreen.bounds is 0×0 or NaN at this
+    // point on iOS 9 iPad mini 1 — we cannot query the real size.  1024×768
+    // is the only landscape resolution that iPad mini 1 has, so this is safe.
+    // The value is sanity-checked after GL context creation in UpdateViewport().
     @try {
-        UIWindow* keyWin = [UIApplication sharedApplication].keyWindow;
-        if (!keyWin) {
-            iOS_WriteLog("SDL_FORCE_FRAME", "no keyWindow!");
+        NSArray<UIWindow*>* allWindows = [UIApplication sharedApplication].windows;
+        if (allWindows.count == 0) {
+            iOS_WriteLog("SDL_FORCE_FRAME", "no UIWindows found in UIApplication.windows");
         } else {
-            // Resize the window itself.
-            keyWin.frame = CGRectMake(0, 0, 1024, 768);
-            [keyWin layoutIfNeeded];
+            CGRect targetFrame = CGRectMake(0, 0, 1024, 768);
+            for (UIWindow* win in allWindows) {
+                // Force the UIWindow
+                win.frame = targetFrame;
+                [win layoutIfNeeded];
 
-            // Resize the root view controller's view (SDL_uikitview).
-            UIView* rootView = keyWin.rootViewController.view;
-            if (rootView) {
-                rootView.frame = CGRectMake(0, 0, 1024, 768);
-                [rootView layoutIfNeeded];
+                // Force the root view controller's view
+                UIView* rootView = win.rootViewController.view;
+                if (rootView) {
+                    rootView.frame = targetFrame;
+                    [rootView layoutIfNeeded];
 
-                // Also resize any subview whose layer is a CAEAGLLayer
-                // (this is the actual drawable that GL context creation needs).
-                for (UIView* subview in rootView.subviews) {
-                    if ([subview.layer isKindOfClass:[CAEAGLLayer class]]) {
-                        subview.frame = CGRectMake(0, 0, 1024, 768);
-                        [subview layoutIfNeeded];
-                        break;
+                    // Force the SDL CAEAGLLayer view (direct child of root)
+                    for (UIView* sub in rootView.subviews) {
+                        sub.frame = targetFrame;
+                        [sub layoutIfNeeded];
+                        // Recurse one level for SDL's internal view hierarchy
+                        for (UIView* subsub in sub.subviews) {
+                            subsub.frame = targetFrame;
+                            [subsub layoutIfNeeded];
+                        }
                     }
                 }
-            }
 
-            char dbg[256];
-            snprintf(dbg, sizeof(dbg),
-                "post-force: win=%.0fx%.0f view=%.0fx%.0f screen=%.0fx%.0f",
-                keyWin.bounds.size.width, keyWin.bounds.size.height,
-                rootView ? rootView.bounds.size.width : 0,
-                rootView ? rootView.bounds.size.height : 0,
-                [UIScreen mainScreen].bounds.size.width,
-                [UIScreen mainScreen].bounds.size.height);
-            iOS_WriteLog("SDL_FORCE_FRAME", dbg);
+                char dbg[256];
+                snprintf(dbg, sizeof(dbg),
+                    "forced win=%.0fx%.0f rootView=%.0fx%.0f",
+                    win.bounds.size.width, win.bounds.size.height,
+                    win.rootViewController.view
+                        ? win.rootViewController.view.bounds.size.width : 0,
+                    win.rootViewController.view
+                        ? win.rootViewController.view.bounds.size.height : 0);
+                iOS_WriteLog("SDL_FORCE_FRAME", dbg);
+            }
         }
     }
     @catch (NSException* ex) {
-        iOS_WriteLog("SDL_FORCE_FRAME_FAIL",
-            ex.reason.UTF8String ? ex.reason.UTF8String : "unknown");
+        iOS_WriteLog("SDL_FORCE_FRAME_FAIL", ex.reason.UTF8String ?: "unknown");
     }
 
-    // Phase 4: Show the window (makeKeyAndVisible).  The views now have
-    // valid sizes, so the layout should not produce NaN.
+    // --- Phase 3: Show window (makeKeyAndVisible) ---
+    // Views now have valid frames, so CoreAnimation layout will not produce NaN.
     @try {
         SDL_ShowWindow(result);
         iOS_WriteLog("SDL_WINDOW_SHOWN", "SDL_ShowWindow OK");
     }
     @catch (NSException* ex) {
-        iOS_WriteLog("SDL_SHOW_WINDOW_FAIL",
-            ex.reason.UTF8String ? ex.reason.UTF8String : "unknown");
+        iOS_WriteLog("SDL_SHOW_WINDOW_FAIL", ex.reason.UTF8String ?: "unknown");
     }
 
-    // Keep the swizzle active for GL context creation.
+    // Swizzle stays active for GL context creation (Phase 4 in iOS_CreateGLContextSafe).
     return result;
 }
 
@@ -369,34 +360,72 @@ extern "C" SDL_Window* iOS_CreateWindowSafe(
 extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
 {
     @try {
-        UIWindow* kw = [UIApplication sharedApplication].keyWindow;
-        if (kw) {
-            const char* orStr = "?";
-            UIInterfaceOrientation orientVal = [UIApplication sharedApplication].statusBarOrientation;
-            if (orientVal == UIInterfaceOrientationLandscapeLeft) orStr = "LL";
-            else if (orientVal == UIInterfaceOrientationLandscapeRight) orStr = "LR";
-            else if (orientVal == UIInterfaceOrientationPortrait) orStr = "P";
-            else if (orientVal == UIInterfaceOrientationPortraitUpsideDown) orStr = "PD";
-
-            char buf[256];
-            snprintf(buf, sizeof(buf),
-                "keyWindow bounds at GL: %.0fx%.0f frame=(%.0f,%.0f,%.0f,%.0f) "
-                "screen=%.0fx%.0f or=%s",
-                kw.bounds.size.width, kw.bounds.size.height,
-                kw.frame.origin.x, kw.frame.origin.y,
-                kw.frame.size.width, kw.frame.size.height,
-                [UIScreen mainScreen].bounds.size.width,
-                [UIScreen mainScreen].bounds.size.height,
-                orStr);
-            iOS_WriteLog("SDL_GL_DEBUG", buf);
-        }
-
-        // The swizzle may have been left active by iOS_CreateWindowSafe,
-        // or it may have been unswizzled and we need to re-install it.
-        BOOL needUnswizzle = !gSwizzleActive;
-        if (needUnswizzle) {
+        // Ensure swizzle is active
+        if (!gSwizzleActive)
             iOS_SwizzleSetPosition();
+
+        // --- Re-force frames before every GL context attempt ---
+        // On iOS 9 iPad mini 1, the CAEAGLLayer drawable requires a non-zero
+        // frame.  Even after SDL_ShowWindow, the layer may still be 0×0 or NaN.
+        // Force all UIWindows + subviews to 1024×768 on every attempt.
+        CGRect targetFrame = CGRectMake(0, 0, 1024, 768);
+        NSArray<UIWindow*>* allWins = [UIApplication sharedApplication].windows;
+        UIWindow* kw = [UIApplication sharedApplication].keyWindow;
+
+        for (UIWindow* win in allWins) {
+            if (win.bounds.size.width <= 0 || win.bounds.size.height <= 0 ||
+                std::isnan(win.bounds.size.width) || std::isnan(win.bounds.size.height))
+            {
+                win.frame = targetFrame;
+                [win layoutIfNeeded];
+
+                UIView* rv = win.rootViewController.view;
+                if (rv) {
+                    rv.frame = targetFrame;
+                    [rv layoutIfNeeded];
+                    for (UIView* sub in rv.subviews) {
+                        sub.frame = targetFrame;
+                        [sub layoutIfNeeded];
+                        for (UIView* subsub in sub.subviews) {
+                            subsub.frame = targetFrame;
+                            [subsub layoutIfNeeded];
+                        }
+                    }
+                }
+            }
         }
+
+        // Log current state so we can track what changed
+        {
+            char buf[256];
+            UIWindow* logWin = kw ?: (allWins.count > 0 ? allWins[0] : nil);
+            if (logWin) {
+                const char* orStr = "?";
+                UIInterfaceOrientation orientVal = [UIApplication sharedApplication].statusBarOrientation;
+                if (orientVal == UIInterfaceOrientationLandscapeLeft)  orStr = "LL";
+                else if (orientVal == UIInterfaceOrientationLandscapeRight) orStr = "LR";
+                else if (orientVal == UIInterfaceOrientationPortrait)  orStr = "P";
+                else if (orientVal == UIInterfaceOrientationPortraitUpsideDown) orStr = "PD";
+
+                snprintf(buf, sizeof(buf),
+                    "keyWindow bounds at GL: %.0fx%.0f frame=(%.0f,%.0f,%.0f,%.0f) "
+                    "screen=%.0fx%.0f or=%s",
+                    logWin.bounds.size.width, logWin.bounds.size.height,
+                    logWin.frame.origin.x, logWin.frame.origin.y,
+                    logWin.frame.size.width, logWin.frame.size.height,
+                    [UIScreen mainScreen].bounds.size.width,
+                    [UIScreen mainScreen].bounds.size.height,
+                    orStr);
+                iOS_WriteLog("SDL_GL_DEBUG", buf);
+            } else {
+                iOS_WriteLog("SDL_GL_DEBUG", "no window found");
+            }
+        }
+
+        // Spin the run loop briefly so CoreAnimation commits the frame changes
+        // before EAGL tries to create the drawable surface.
+        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                                 beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
 
         SDL_GLContext ctx = SDL_GL_CreateContext(window);
 
@@ -404,15 +433,10 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
             const char* sdlErr = SDL_GetError();
             iOS_WriteLog("SDL_GL_CREATECONTEXT_FAIL",
                 sdlErr ? sdlErr : "SDL_GL_CreateContext returned NULL");
-            if (needUnswizzle) {
-                iOS_UnswizzleSetPosition();
-            }
-            // If the swizzle was from iOS_CreateWindowSafe, leave it active
-            // for potential retries.
+            // Leave swizzle active — caller retries
         } else {
-            if (gSwizzleActive) {
-                iOS_UnswizzleSetPosition();
-            }
+            // Success — remove swizzle
+            iOS_UnswizzleSetPosition();
         }
 
         return ctx;
@@ -420,10 +444,10 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
     @catch (NSException* ex) {
         const char* reason = ex.reason.UTF8String ? ex.reason.UTF8String : "unknown";
         iOS_WriteLog("SDL_GL_CREATECONTEXT_EXCEPTION", reason);
-        // On exception, leave swizzle state as-is (retries may need it)
         return nullptr;
     }
 }
+
 
 /// Top-level @try/@catch wrapper for the game's entry-point function.
 /// Catches any ObjC NSException that propagates up from the game loop
