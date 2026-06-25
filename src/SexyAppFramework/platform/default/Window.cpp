@@ -76,7 +76,7 @@ void SexyAppBase::MakeWindow()
 		// Wait up to 3 s for UIScreen to have valid bounds (avoids NaN in UIKit)
 		int displayW = 0;
 		int displayH = 0;
-		iOS_WaitForValidScreenBounds(&displayW, &displayH, 3000);
+		iOS_WaitForValidScreenBounds(&displayW, &displayH, 100);
 
 		// Also ask SDL for the display mode (may be more reliable after SDL_Init)
 		SDL_DisplayMode displayMode;
