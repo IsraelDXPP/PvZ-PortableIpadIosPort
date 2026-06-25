@@ -185,7 +185,10 @@ static int ios_entry_point(int argc, char** argv)
 		return 1;
 	}
 
-	return run_game(argc, argv);
+	// Defer run_game() until UIApplicationStateActive.  SDL invokes main()
+	// from applicationDidFinishLaunching, but UIScreen.bounds stays 0×0 on
+	// iOS 9 iPad until applicationDidBecomeActive fires.
+	return iOS_RunGameAfterActivation(run_game, argc, argv);
 }
 #endif
 
