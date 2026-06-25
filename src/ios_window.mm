@@ -303,7 +303,16 @@ extern "C" SDL_Window* iOS_CreateWindowSafe(
     @try {
         SDL_Window* result = SDL_CreateWindow(title, x, y, w, h, flags);
         if (result) {
+            // The swizzle may have replaced NaN coordinates with (0,0);
+            // force the key window to proper landscape dimensions so the
+            // OpenGL view isn't zero-sized when SDL_GL_CreateContext runs.
+            UIWindow* keyWin = [UIApplication sharedApplication].keyWindow;
+            if (keyWin) {
+                keyWin.frame = CGRectMake(0, 0, 1024, 768);
+                [keyWin layoutIfNeeded];
+            }
             iOS_UnswizzleSetPosition();
+            iOS_WriteLog("SDL_WINDOW_OK", "window created successfully");
             return result;
         }
     }
