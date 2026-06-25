@@ -1,5 +1,6 @@
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
+#import <objc/runtime.h>
 
 #include "ios_platform.h"
 
@@ -202,16 +203,76 @@ extern "C" bool iOS_WaitForValidScreenBounds(int* outW, int* outH, int maxWaitMs
 }
 
 /// Safe wrapper around SDL_CreateWindow for iOS.
-/// Uses ObjC @try/@catch to prevent CALayerInvalidGeometry (and any other
-/// UIKit NSException).
 ///
-/// Strategies:
-///   1. Normal SDL_CreateWindow
-///   2. Create a manual UIWindow with Landscape frame and use SDL_CreateWindowFrom
+/// Phases:
+///   0. Swizzle CALayer.setPosition: to suppress NaN values
+///   1. Pre-rotate the device to landscape before SDL window creation
+///   2. Normal SDL_CreateWindow
+///   3. Manual UIWindow fallback via SDL_CreateWindowFrom
+///
+/// Silently fix NaN values in a CGPoint by replacing them with the other
+/// coordinate (or 0 if both are NaN).  Returns YES if a fix was applied.
+static BOOL iOS_FixNaNPoint(CGPoint* p)
+{
+    BOOL fixed = NO;
+    if (isnan(p->x) && isnan(p->y)) {
+        p->x = 0; p->y = 0; fixed = YES;
+    } else if (isnan(p->x)) {
+        p->x = p->y; fixed = YES;
+    } else if (isnan(p->y)) {
+        p->y = p->x; fixed = YES;
+    }
+    return fixed;
+}
+
+/// Original CALayer.setPosition: IMP, saved before we swizzle it.
+static void (*gOrigSetPosition)(id, SEL, CGPoint);
+
+/// Swizzled replacement for CALayer.setPosition: that silently replaces
+/// NaN coordinates with 0 to prevent "CALayer position contains NaN".
+static void iOS_SwizzledSetPosition(id self, SEL _cmd, CGPoint position)
+{
+    iOS_FixNaNPoint(&position);
+    gOrigSetPosition(self, _cmd, position);
+}
+
+/// Whether the CALayer.setPosition: swizzle is currently active.
+static BOOL gSwizzleActive = NO;
+
+/// Install a temporary swizzle on CALayer.setPosition: that filters NaN.
+/// Call iOS_UnswizzleSetPosition() to restore the original.
+static void iOS_SwizzleSetPosition(void)
+{
+    if (gSwizzleActive) return;
+    gSwizzleActive = YES;
+
+    Method m = class_getInstanceMethod([CALayer class], @selector(setPosition:));
+    gOrigSetPosition = (void (*)(id, SEL, CGPoint))method_getImplementation(m);
+    method_setImplementation(m, (IMP)iOS_SwizzledSetPosition);
+}
+
+/// Restore the original CALayer.setPosition: implementation.
+static void iOS_UnswizzleSetPosition(void)
+{
+    if (!gSwizzleActive) return;
+    gSwizzleActive = NO;
+
+    Method m = class_getInstanceMethod([CALayer class], @selector(setPosition:));
+    method_setImplementation(m, (IMP)gOrigSetPosition);
+    gOrigSetPosition = nil;
+}
+
 extern "C" SDL_Window* iOS_CreateWindowSafe(
     const char* title, int x, int y, int w, int h, Uint32 flags)
 {
-    // Phase 0: Pre-rotation — force the device into landscape BEFORE SDL
+    // Phase 0: Swizzle CALayer.setPosition: to suppress NaN.
+    // SDL's window creation on iOS 9 can trigger CoreAnimation to try to set
+    // a layer position containing NaN during the initial orientation/layout
+    // transition.  We catch this at the CALayer level so SDL never sees the
+    // NSException and the window is set up correctly.
+    iOS_SwizzleSetPosition();
+
+    // Phase 1: Pre-rotation — force the device into landscape BEFORE SDL
     // creates its window.  On iOS 9 at boot the device is in portrait; if
     // SDL's makeKeyAndVisible is the FIRST rotation, the transition can
     // produce "CALayer position contains NaN: [0 nan]".
@@ -241,7 +302,10 @@ extern "C" SDL_Window* iOS_CreateWindowSafe(
     // Strategy 1: normal SDL_CreateWindow (now in stable landscape)
     @try {
         SDL_Window* result = SDL_CreateWindow(title, x, y, w, h, flags);
-        if (result) return result;
+        if (result) {
+            iOS_UnswizzleSetPosition();
+            return result;
+        }
     }
     @catch (NSException* ex) {
         iOS_WriteLog("SDL_CREATE_WINDOW_FAIL",
@@ -258,6 +322,7 @@ extern "C" SDL_Window* iOS_CreateWindowSafe(
         SDL_Window* result = SDL_CreateWindowFrom((__bridge void*)uiWindow);
         if (result) {
             iOS_WriteLog("SDL_WINDOW_RETRY", "SDL_CreateWindowFrom OK");
+            iOS_UnswizzleSetPosition();
             return result;
         }
         iOS_WriteLog("SDL_WINDOW_RETRY", "SDL_CreateWindowFrom returned null");
@@ -267,6 +332,7 @@ extern "C" SDL_Window* iOS_CreateWindowSafe(
             ex.reason.UTF8String ? ex.reason.UTF8String : "unknown");
     }
 
+    iOS_UnswizzleSetPosition();
     iOS_WriteLog("SDL_WINDOW_RETRY", "all attempts failed");
     return nullptr;
 }
