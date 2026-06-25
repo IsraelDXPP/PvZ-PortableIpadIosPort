@@ -44,7 +44,7 @@ extern "C" {
 
 #ifdef __IPHONEOS__
 #include "ios_platform.h"
-extern "C" void install_ios_exception_handler();
+extern void install_ios_exception_handler();
 #endif
 
 #ifdef __EMSCRIPTEN__
