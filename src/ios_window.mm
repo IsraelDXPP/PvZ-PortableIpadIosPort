@@ -272,25 +272,31 @@ extern "C" SDL_Window* iOS_CreateWindowSafe(
     // NSException and the window is set up correctly.
     iOS_SwizzleSetPosition();
 
-    // Phase 1: Pre-rotation — force the device into landscape BEFORE SDL
-    // creates its window.  On iOS 9 at boot the device is in portrait; if
-    // SDL's makeKeyAndVisible is the FIRST rotation, the transition can
-    // produce "CALayer position contains NaN: [0 nan]".
+    // Phase 1: Force screen initialization and pre-rotation.
+    //
+    // On iOS 9 at boot, [UIScreen mainScreen].bounds returns (0,0,0,0)
+    // until the first UIWindow is made key & visible.  We create a temp
+    // window with an EXPLICIT landscape frame (1024x768) to force the
+    // system to initialise the screen geometry *before* SDL touches it.
     @try {
-        iOS_WriteLog("SDL_WINDOW_INIT", "prerotating to landscape...");
+        iOS_WriteLog("SDL_WINDOW_INIT", "forcing screen init + landscape prerotate...");
 
-        UIWindow* preWin = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
+        UIWindow* preWin = [[UIWindow alloc] initWithFrame:CGRectMake(0, 0, 1024, 768)];
         preWin.rootViewController = [[SDL_PrerotateVC alloc] init];
-
-        // This triggers the system to evaluate supported orientations:
-        // since our VC only allows landscape, the system rotates the device
-        // now (before SDL is involved), settling into a stable state.
         [preWin makeKeyAndVisible];
 
-        // Give the run loop time to complete the rotation animation.
+        // Let the run loop settle so the screen bounds are updated.
         [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.5]];
 
-        // Tear down the temp window so SDL starts fresh.
+        // Verify screen is now valid
+        CGRect sb = [UIScreen mainScreen].bounds;
+        if (sb.size.width < 1 || sb.size.height < 1) {
+            char buf[128];
+            snprintf(buf, sizeof(buf), "screen still invalid after prerotate: %.0fx%.0f",
+                     sb.size.width, sb.size.height);
+            iOS_WriteLog("SDL_WINDOW_INIT", buf);
+        }
+
         preWin.hidden = YES;
         preWin.rootViewController = nil;
     }
@@ -303,30 +309,36 @@ extern "C" SDL_Window* iOS_CreateWindowSafe(
     @try {
         SDL_Window* result = SDL_CreateWindow(title, x, y, w, h, flags);
         if (result) {
-            // The swizzle may have replaced NaN coordinates with (0,0);
-            // force the key window to proper landscape dimensions so the
-            // OpenGL view isn't zero-sized when SDL_GL_CreateContext runs.
+            iOS_WriteLog("SDL_WINDOW_OK", "window created successfully");
+
+            // Force window + root view to landscape dimensions.
+            // [UIScreen mainScreen].bounds may still be (0,0,0,0) on iOS 9
+            // at boot, so we can't rely on it.
             UIWindow* keyWin = [UIApplication sharedApplication].keyWindow;
+            UIView* rootView = keyWin.rootViewController.view;
             if (keyWin) {
                 keyWin.frame = CGRectMake(0, 0, 1024, 768);
                 [keyWin layoutIfNeeded];
             }
-            iOS_WriteLog("SDL_WINDOW_OK", "window created successfully");
-            // Keep the swizzle active — the caller will call
-            // iOS_CreateGLContextSafe next, which may also trigger NaN during
-            // setSDLWindow: / layoutSubviews.
-
-            // Log actual window dimensions for debugging
-            UIWindow* kw2 = [UIApplication sharedApplication].keyWindow;
-            if (kw2) {
-                char buf[128];
-                snprintf(buf, sizeof(buf),
-                    "keyWindow frame after SDL_CW: %.0fx%.0f (screen %.0fx%.0f)",
-                    kw2.bounds.size.width, kw2.bounds.size.height,
-                    [UIScreen mainScreen].bounds.size.width,
-                    [UIScreen mainScreen].bounds.size.height);
-                iOS_WriteLog("SDL_WINDOW_DEBUG", buf);
+            if (rootView && (rootView.bounds.size.width < 1 || rootView.bounds.size.height < 1)) {
+                rootView.frame = CGRectMake(0, 0, 1024, 768);
+                [rootView layoutIfNeeded];
             }
+
+            // Log actual dimensions
+            CGRect sb = [UIScreen mainScreen].bounds;
+            char dbg[256];
+            snprintf(dbg, sizeof(dbg),
+                "post-force: win=%.0fx%.0f view=%.0fx%.0f screen=%.0fx%.0f",
+                keyWin ? keyWin.bounds.size.width : 0,
+                keyWin ? keyWin.bounds.size.height : 0,
+                rootView ? rootView.bounds.size.width : 0,
+                rootView ? rootView.bounds.size.height : 0,
+                sb.size.width, sb.size.height);
+            iOS_WriteLog("SDL_WINDOW_DEBUG", dbg);
+
+            // Keep the swizzle active — iOS_CreateGLContextSafe will unswizzle
+            // on success (it may also trigger NaN during setSDLWindow:).
             return result;
         }
     }
