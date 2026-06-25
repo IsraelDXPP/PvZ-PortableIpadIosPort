@@ -231,3 +231,49 @@ extern "C" SDL_Window* iOS_CreateWindowSafe(
 
     return result;
 }
+
+/// Safe wrapper around SDL_GL_CreateContext for iOS.
+/// Uses ObjC @try/@catch to prevent any UIKit NSException from escaping
+/// into the SjLj C++ unwinder.
+extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
+{
+    @try {
+        return SDL_GL_CreateContext(window);
+    }
+    @catch (NSException* ex) {
+        const char* reason = ex.reason.UTF8String ? ex.reason.UTF8String : "unknown";
+        iOS_WriteLog("SDL_GL_CREATECONTEXT_FAIL", reason);
+        return nullptr;
+    }
+}
+
+/// Top-level @try/@catch wrapper for the game's entry-point function.
+/// Catches any ObjC NSException that propagates up from the game loop
+/// (e.g. from UIKit callbacks, display link, touch handling) before it
+/// reaches the C++ SjLj unwinder where it would trigger __cxa_bad_cast → abort().
+///
+/// Returns the value returned by `entry`, or 1 if an exception was caught.
+extern "C" int iOS_RunWithExceptionCatch(int (*entry)(int, char**), int argc, char** argv)
+{
+    @autoreleasepool {
+        @try {
+            return entry(argc, argv);
+        }
+        @catch (NSException* exception) {
+            NSString* desc = [NSString stringWithFormat:
+                @"%@: %@\n%@",
+                exception.name,
+                exception.reason,
+                [[exception callStackSymbols] componentsJoinedByString:@"\n"]];
+            const char* utf8 = desc.UTF8String ? desc.UTF8String : "unknown exception";
+            iOS_WriteLog("FATAL_OBJC_EXCEPTION", utf8);
+            NSLog(@"[PvZ OBJC CATCH] %@", desc);
+            // Try to show an alert so the user knows something went wrong.
+            // If the UI isn't ready, this safely degrades to just logging.
+            iOS_ShowBlockingAlert("Fatal Error",
+                [[NSString stringWithFormat:@"An unexpected error occurred:\n%@: %@",
+                    exception.name, exception.reason] UTF8String]);
+            return 1;
+        }
+    }
+}

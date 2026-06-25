@@ -30,6 +30,17 @@ struct SDL_Window;
 typedef unsigned int Uint32;
 SDL_Window* iOS_CreateWindowSafe(const char* title, int x, int y, int w, int h, Uint32 flags);
 
+/* Safe wrapper around SDL_GL_CreateContext for iOS.
+   Uses ObjC @try/@catch to prevent UIKit NSExceptions from escaping.
+   Returns an SDL_GLContext (void*) or nullptr on failure. */
+void* iOS_CreateGLContextSafe(struct SDL_Window* window);
+
+/* Top-level @try/@catch wrapper around the game's entry-point function.
+   Catches any ObjC NSException that propagates up from the game loop
+   before it reaches the C++ SjLj unwinder.  Returns entry(argc, argv)
+   or 1 if an exception was caught. */
+int iOS_RunWithExceptionCatch(int (*entry)(int, char**), int argc, char** argv);
+
 #ifdef __cplusplus
 }
 #endif
