@@ -5,6 +5,7 @@
 #include "ios_platform.h"
 
 #include <SDL.h>
+#include <SDL_syswm.h>
 
 #include <cmath>
 #include <cstring>
@@ -35,6 +36,171 @@ static void iOS_WriteLog(const char* tag, const char* message)
             fclose(f);
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// iPad / UIKit layout helpers
+// ---------------------------------------------------------------------------
+
+static BOOL iOS_IsPad(void)
+{
+    return [[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad;
+}
+
+static BOOL iOS_SizeIsValid(CGSize size)
+{
+    return size.width > 0.0f && size.height > 0.0f &&
+           !std::isnan(size.width) && !std::isnan(size.height);
+}
+
+static void iOS_PumpRunLoopMs(int ms)
+{
+    const int stepMs = 16;
+    int waited = 0;
+    while (waited < ms) {
+        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                                 beforeDate:[NSDate dateWithTimeIntervalSinceNow:stepMs / 1000.0]];
+        SDL_PumpEvents();
+        waited += stepMs;
+    }
+}
+
+/// Try several UIKit sources for the current screen size in points.
+static BOOL iOS_MeasureScreenSize(CGSize* outSize)
+{
+    UIScreen* screen = [UIScreen mainScreen];
+    if (!screen)
+        return NO;
+
+    CGRect bounds = screen.bounds;
+    if (iOS_SizeIsValid(bounds.size)) {
+        *outSize = bounds.size;
+        return YES;
+    }
+
+    if ([screen respondsToSelector:@selector(nativeBounds)]) {
+        CGRect native = screen.nativeBounds;
+        CGFloat scale = screen.scale > 0.0f ? screen.scale : 1.0f;
+        CGSize points = CGSizeMake(native.size.width / scale, native.size.height / scale);
+        if (iOS_SizeIsValid(points)) {
+            *outSize = points;
+            return YES;
+        }
+    }
+
+    CGSize mode = screen.currentMode.size;
+    if (mode.width > 0.0f && mode.height > 0.0f) {
+        CGFloat scale = screen.scale > 0.0f ? screen.scale : 1.0f;
+        CGSize points = CGSizeMake(mode.width / scale, mode.height / scale);
+        if (iOS_SizeIsValid(points)) {
+            *outSize = points;
+            return YES;
+        }
+    }
+
+    return NO;
+}
+
+static UIWindow* iOS_GetSDLUIWindow(SDL_Window* window)
+{
+    if (!window)
+        return nil;
+
+    SDL_SysWMinfo info;
+    SDL_VERSION(&info.version);
+    if (!SDL_GetWindowWMInfo(window, &info))
+        return nil;
+
+#if defined(SDL_SYSWM_UIKIT)
+    if (info.subsystem == SDL_SYSWM_UIKIT)
+        return info.info.uikit.window;
+#endif
+    return nil;
+}
+
+static UIWindow* iOS_FindActiveWindow(SDL_Window* sdlWindow)
+{
+    UIWindow* win = iOS_GetSDLUIWindow(sdlWindow);
+    if (win)
+        return win;
+
+    win = [UIApplication sharedApplication].keyWindow;
+    if (win)
+        return win;
+
+    NSArray<UIWindow*>* wins = [UIApplication sharedApplication].windows;
+    return wins.count > 0 ? wins[0] : nil;
+}
+
+/// On iPad, UIWindow bounds can stay 0×0 until UIKit finishes launch layout.
+/// Resize the SDL UIWindow from the real UIScreen bounds once they are known.
+static BOOL iOS_SyncWindowToScreen(SDL_Window* sdlWindow, UIWindow* uiWindow)
+{
+    CGSize screenSize;
+    if (!iOS_MeasureScreenSize(&screenSize))
+        return NO;
+
+    UIScreen* screen = [UIScreen mainScreen];
+    CGRect target = screen.bounds;
+    if (!iOS_SizeIsValid(target.size))
+        target = CGRectMake(0, 0, screenSize.width, screenSize.height);
+
+    if (uiWindow) {
+        if (!iOS_SizeIsValid(uiWindow.bounds.size))
+            uiWindow.frame = target;
+        [uiWindow makeKeyAndVisible];
+        [uiWindow layoutIfNeeded];
+
+        UIView* rootView = uiWindow.rootViewController.view;
+        if (rootView && !iOS_SizeIsValid(rootView.bounds.size)) {
+            rootView.frame = uiWindow.bounds;
+            [rootView setNeedsLayout];
+            [rootView layoutIfNeeded];
+        }
+    }
+
+    if (sdlWindow) {
+        int w = (int)target.size.width;
+        int h = (int)target.size.height;
+        if (uiWindow && iOS_SizeIsValid(uiWindow.bounds.size)) {
+            w = (int)uiWindow.bounds.size.width;
+            h = (int)uiWindow.bounds.size.height;
+        }
+        SDL_SetWindowSize(sdlWindow, w, h);
+    }
+
+    return uiWindow ? iOS_SizeIsValid(uiWindow.bounds.size) : iOS_SizeIsValid(target.size);
+}
+
+/// Pump the main run loop until the SDL window (or UIScreen) has non-zero bounds.
+/// iPad-only: iPhone launch layout is already reliable enough.
+static BOOL iOS_WaitForWindowLayout(SDL_Window* sdlWindow, int maxWaitMs)
+{
+    if (!iOS_IsPad())
+        return YES;
+
+    const int stepMs = 50;
+    int waited = 0;
+
+    while (waited < maxWaitMs) {
+        @autoreleasepool {
+            UIWindow* uiWindow = iOS_FindActiveWindow(sdlWindow);
+            if (uiWindow && iOS_SizeIsValid(uiWindow.bounds.size))
+                return YES;
+
+            if (iOS_SyncWindowToScreen(sdlWindow, uiWindow)) {
+                iOS_PumpRunLoopMs(stepMs);
+                uiWindow = iOS_FindActiveWindow(sdlWindow);
+                if (uiWindow && iOS_SizeIsValid(uiWindow.bounds.size))
+                    return YES;
+            }
+        }
+
+        iOS_PumpRunLoopMs(stepMs);
+        waited += stepMs;
+    }
+
+    return NO;
 }
 
 // ---------------------------------------------------------------------------
@@ -159,33 +325,31 @@ extern "C" void iOS_ShowBlockingAlert(const char* title, const char* message)
 
 extern "C" bool iOS_WaitForValidScreenBounds(int* outW, int* outH, int maxWaitMs)
 {
+    if (outW != nullptr)
+        *outW = 0;
+    if (outH != nullptr)
+        *outH = 0;
+
     const int stepMs = 50;
     int waited = 0;
 
     while (waited < maxWaitMs)
     {
         @autoreleasepool {
-            CGRect bounds = [UIScreen mainScreen].bounds;
-            if (bounds.size.width > 0.0f && bounds.size.height > 0.0f &&
-                !std::isnan(bounds.size.width) && !std::isnan(bounds.size.height))
-            {
+            CGSize size;
+            if (iOS_MeasureScreenSize(&size)) {
                 if (outW != nullptr)
-                    *outW = (int)bounds.size.width;
+                    *outW = (int)size.width;
                 if (outH != nullptr)
-                    *outH = (int)bounds.size.height;
+                    *outH = (int)size.height;
                 return true;
             }
         }
 
-        SDL_Delay(stepMs);
-        SDL_PumpEvents();
+        iOS_PumpRunLoopMs(stepMs);
         waited += stepMs;
     }
 
-    if (outW != nullptr)
-        *outW = 1024;
-    if (outH != nullptr)
-        *outH = 768;
     return false;
 }
 
@@ -252,103 +416,75 @@ static void iOS_UnswizzleSetPosition(void)
 extern "C" SDL_Window* iOS_CreateWindowSafe(
     const char* title, int x, int y, int w, int h, Uint32 flags)
 {
-    // --- Phase 0: NaN swizzle ---
-    // Keep CALayer.setPosition: swizzle active throughout window/GL setup to
-    // prevent CALayerInvalidGeometry from escaping into the SjLj unwinder.
+    // --- NaN swizzle (install BEFORE SDL touches any CALayer) ---
+    //
+    // On iOS 9 iPad mini 1, UIScreen.mainScreen.bounds is 0×0 at the moment
+    // SDL creates the UIWindow.  SDL passes this 0×0 frame to the UIWindow
+    // and its CALayer.  When UIKit tries to make this the key window
+    // (makeKeyAndVisible) it calls [CALayer setPosition:] with position.y = NaN
+    // (0 / 0 = NaN from a frame calculation).  This throws CALayerInvalidGeometry
+    // which, through the SjLj C++ unwinder (-fsjlj-exceptions), becomes
+    // __cxa_bad_cast → abort().
+    //
+    // The swizzle replaces NaN coordinates with 0 BEFORE the throw, so the
+    // exception never happens.
+    //
+    // WHY NOT SDL_WINDOW_HIDDEN?
+    //   Hiding the window skips makeKeyAndVisible.  Without makeKeyAndVisible
+    //   UIKit never makes this UIWindow the key window, so UIScreen.mainScreen.bounds
+    //   stays 0×0 forever.  EAGL requires a valid non-zero layer size to create
+    //   an OpenGL ES drawable — it fails every retry because bounds are always 0.
+    //
+    // The correct fix is: swizzle + VISIBLE window.  The swizzle prevents the
+    // NaN crash; a visible (key) window lets UIKit resolve UIScreen bounds.
     iOS_SwizzleSetPosition();
-
-    // --- Phase 1: Create window HIDDEN ---
-    // On iPad mini 1 (iOS 9) UIScreen.bounds is 0×0 at this point.
-    // Creating the window HIDDEN means SDL skips makeKeyAndVisible, which
-    // prevents the "divide-by-zero → NaN CALayer" crash during first layout.
-    Uint32 hiddenFlags = (flags | SDL_WINDOW_HIDDEN) & ~SDL_WINDOW_SHOWN;
+    iOS_WriteLog("SDL_WINDOW_INIT", "creating VISIBLE window (swizzle guards NaN)");
 
     SDL_Window* result = nullptr;
     @try {
-        iOS_WriteLog("SDL_WINDOW_INIT", "creating HIDDEN window to bypass zero-size issue");
-        result = SDL_CreateWindow(title, x, y, w, h, hiddenFlags);
-        if (result)
-            iOS_WriteLog("SDL_WINDOW_OK", "SDL window created (HIDDEN)");
-        else
+        result = SDL_CreateWindow(title, x, y, w, h, flags);
+        if (result) {
+            // Log the actual window/screen state so we can verify bounds resolved.
+            UIWindow* kw = [UIApplication sharedApplication].keyWindow;
+            char dbg[256];
+            snprintf(dbg, sizeof(dbg),
+                "win=%p keyWin=%.0fx%.0f screen=%.0fx%.0f",
+                (void*)result,
+                kw ? kw.bounds.size.width  : 0,
+                kw ? kw.bounds.size.height : 0,
+                [UIScreen mainScreen].bounds.size.width,
+                [UIScreen mainScreen].bounds.size.height);
+            iOS_WriteLog("SDL_WINDOW_OK", dbg);
+        } else {
             iOS_WriteLog("SDL_CREATE_WINDOW_FAIL", SDL_GetError() ?: "null");
+        }
     }
     @catch (NSException* ex) {
         iOS_WriteLog("SDL_CREATE_WINDOW_EXCEPTION",
             ex.reason.UTF8String ?: "unknown");
-    }
-
-    if (!result) {
         iOS_UnswizzleSetPosition();
         return nullptr;
     }
 
-    // --- Phase 2: Force valid frame on all UIWindows before show ---
-    //
-    // At this point keyWindow may still be nil (because we used HIDDEN).
-    // We iterate ALL windows and force 1024×768 (iPad mini 1 landscape).
-    //
-    // Why hardcode 1024×768?  Because UIScreen.bounds is 0×0 or NaN at this
-    // point on iOS 9 iPad mini 1 — we cannot query the real size.  1024×768
-    // is the only landscape resolution that iPad mini 1 has, so this is safe.
-    // The value is sanity-checked after GL context creation in UpdateViewport().
-    @try {
-        NSArray<UIWindow*>* allWindows = [UIApplication sharedApplication].windows;
-        if (allWindows.count == 0) {
-            iOS_WriteLog("SDL_FORCE_FRAME", "no UIWindows found in UIApplication.windows");
-        } else {
-            CGRect targetFrame = CGRectMake(0, 0, 1024, 768);
-            for (UIWindow* win in allWindows) {
-                // Force the UIWindow
-                win.frame = targetFrame;
-                [win layoutIfNeeded];
-
-                // Force the root view controller's view
-                UIView* rootView = win.rootViewController.view;
-                if (rootView) {
-                    rootView.frame = targetFrame;
-                    [rootView layoutIfNeeded];
-
-                    // Force the SDL CAEAGLLayer view (direct child of root)
-                    for (UIView* sub in rootView.subviews) {
-                        sub.frame = targetFrame;
-                        [sub layoutIfNeeded];
-                        // Recurse one level for SDL's internal view hierarchy
-                        for (UIView* subsub in sub.subviews) {
-                            subsub.frame = targetFrame;
-                            [subsub layoutIfNeeded];
-                        }
-                    }
-                }
-
-                char dbg[256];
-                snprintf(dbg, sizeof(dbg),
-                    "forced win=%.0fx%.0f rootView=%.0fx%.0f",
-                    win.bounds.size.width, win.bounds.size.height,
-                    win.rootViewController.view
-                        ? win.rootViewController.view.bounds.size.width : 0,
-                    win.rootViewController.view
-                        ? win.rootViewController.view.bounds.size.height : 0);
-                iOS_WriteLog("SDL_FORCE_FRAME", dbg);
-            }
-        }
-    }
-    @catch (NSException* ex) {
-        iOS_WriteLog("SDL_FORCE_FRAME_FAIL", ex.reason.UTF8String ?: "unknown");
+    // Swizzle stays active until iOS_CreateGLContextSafe succeeds.
+    if (result && iOS_IsPad()) {
+        const bool layoutReady = iOS_WaitForWindowLayout(result, 3000);
+        UIWindow* kw = iOS_FindActiveWindow(result);
+        char dbg[256];
+        snprintf(dbg, sizeof(dbg),
+            "layout=%s win=%p keyWin=%.0fx%.0f screen=%.0fx%.0f",
+            layoutReady ? "OK" : "TIMEOUT",
+            (void*)result,
+            kw ? kw.bounds.size.width  : 0,
+            kw ? kw.bounds.size.height : 0,
+            [UIScreen mainScreen].bounds.size.width,
+            [UIScreen mainScreen].bounds.size.height);
+        iOS_WriteLog("SDL_WINDOW_LAYOUT", dbg);
     }
 
-    // --- Phase 3: Show window (makeKeyAndVisible) ---
-    // Views now have valid frames, so CoreAnimation layout will not produce NaN.
-    @try {
-        SDL_ShowWindow(result);
-        iOS_WriteLog("SDL_WINDOW_SHOWN", "SDL_ShowWindow OK");
-    }
-    @catch (NSException* ex) {
-        iOS_WriteLog("SDL_SHOW_WINDOW_FAIL", ex.reason.UTF8String ?: "unknown");
-    }
-
-    // Swizzle stays active for GL context creation (Phase 4 in iOS_CreateGLContextSafe).
     return result;
 }
+
 
 /// Safe wrapper around SDL_GL_CreateContext for iOS.
 ///
@@ -364,34 +500,15 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
         if (!gSwizzleActive)
             iOS_SwizzleSetPosition();
 
-        // --- Re-force frames before every GL context attempt ---
-        // On iOS 9 iPad mini 1, the CAEAGLLayer drawable requires a non-zero
-        // frame.  Even after SDL_ShowWindow, the layer may still be 0×0 or NaN.
-        // Force all UIWindows + subviews to 1024×768 on every attempt.
-        CGRect targetFrame = CGRectMake(0, 0, 1024, 768);
+        UIWindow* kw = iOS_FindActiveWindow(window);
         NSArray<UIWindow*>* allWins = [UIApplication sharedApplication].windows;
-        UIWindow* kw = [UIApplication sharedApplication].keyWindow;
 
-        for (UIWindow* win in allWins) {
-            if (win.bounds.size.width <= 0 || win.bounds.size.height <= 0 ||
-                std::isnan(win.bounds.size.width) || std::isnan(win.bounds.size.height))
-            {
-                win.frame = targetFrame;
-                [win layoutIfNeeded];
-
-                UIView* rv = win.rootViewController.view;
-                if (rv) {
-                    rv.frame = targetFrame;
-                    [rv layoutIfNeeded];
-                    for (UIView* sub in rv.subviews) {
-                        sub.frame = targetFrame;
-                        [sub layoutIfNeeded];
-                        for (UIView* subsub in sub.subviews) {
-                            subsub.frame = targetFrame;
-                            [subsub layoutIfNeeded];
-                        }
-                    }
-                }
+        // iPad: EAGL needs a non-zero CAEAGLLayer. Wait for real UIKit layout first.
+        if (iOS_IsPad()) {
+            if (!iOS_WaitForWindowLayout(window, 500)) {
+                iOS_SyncWindowToScreen(window, kw);
+                iOS_PumpRunLoopMs(50);
+                kw = iOS_FindActiveWindow(window);
             }
         }
 
@@ -422,10 +539,18 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
             }
         }
 
-        // Spin the run loop briefly so CoreAnimation commits the frame changes
-        // before EAGL tries to create the drawable surface.
-        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
-                                 beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+        // Spin the run loop so CoreAnimation commits layout before EAGL allocation.
+        iOS_PumpRunLoopMs(50);
+
+        // Do not attempt GL on iPad while the drawable is still zero-sized.
+        if (iOS_IsPad()) {
+            kw = iOS_FindActiveWindow(window);
+            if (!kw || !iOS_SizeIsValid(kw.bounds.size)) {
+                iOS_WriteLog("SDL_GL_CREATECONTEXT_FAIL",
+                    "iPad window bounds still zero — waiting for UIKit layout");
+                return nullptr;
+            }
+        }
 
         SDL_GLContext ctx = SDL_GL_CreateContext(window);
 

@@ -18,8 +18,8 @@ void iOS_WriteLogPublic(const char* tag, const char* message);
    Safe to call from any thread. Always logs to pvz_log.txt first. */
 void iOS_ShowBlockingAlert(const char* title, const char* message);
 
-/* Spin-waits up to maxWaitMs ms until UIScreen.mainScreen.bounds is valid.
-   Falls back to 1024x768 if it times out. */
+/* Spin-waits up to maxWaitMs ms until the main UIScreen reports a valid size.
+   Returns false if no size is available before timeout (outputs stay 0). */
 bool iOS_WaitForValidScreenBounds(int* outW, int* outH, int maxWaitMs);
 
 /* Safe replacement for SDL_CreateWindow on iOS.

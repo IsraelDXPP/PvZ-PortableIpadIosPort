@@ -73,12 +73,12 @@ void SexyAppBase::MakeWindow()
 		//  4. Wrap SDL_CreateWindow in @try/@catch to catch CALayerInvalidGeometry
 		//     before it escapes into SjLj territory and causes an unrecoverable abort.
 
-		// Wait up to 3 s for UIScreen to have valid bounds (avoids NaN in UIKit)
+		// Wait for UIScreen to report real bounds (iPad can stay 0×0 briefly at launch).
 		int displayW = 0;
 		int displayH = 0;
-		iOS_WaitForValidScreenBounds(&displayW, &displayH, 100);
+		iOS_WaitForValidScreenBounds(&displayW, &displayH, 3000);
 
-		// Also ask SDL for the display mode (may be more reliable after SDL_Init)
+		// SDL display mode is often available once video is initialised.
 		SDL_DisplayMode displayMode;
 		if (SDL_GetCurrentDisplayMode(0, &displayMode) == 0 &&
 			displayMode.w > 0 && displayMode.h > 0)
@@ -86,11 +86,11 @@ void SexyAppBase::MakeWindow()
 			displayW = displayMode.w;
 			displayH = displayMode.h;
 		}
-
-		// Failsafe
-		if (displayW <= 0 || displayH <= 0) {
-			displayW = 1024;
-			displayH = 768;
+		else if (SDL_GetDesktopDisplayMode(0, &displayMode) == 0 &&
+			displayMode.w > 0 && displayMode.h > 0)
+		{
+			displayW = displayMode.w;
+			displayH = displayMode.h;
 		}
 
 		// Use FULLSCREEN_DESKTOP: SDL defers the CALayer frame to UIKit entirely.
