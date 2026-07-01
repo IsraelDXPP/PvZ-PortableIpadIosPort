@@ -1754,7 +1754,7 @@ void LawnApp::LoadingThreadProc()
 	}
 	mNumLoadingThreadTasks += 636;
 	mNumLoadingThreadTasks += GetNumPreloadingTasks();
-	mNumLoadingThreadTasks += mMusic->GetNumLoadingTasks();
+	mNumLoadingThreadTasks += Music::MUSIC_LOADING_TASKS;
 
 	PerfTimer aTimer;
 	aTimer.Start();

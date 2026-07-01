@@ -54,17 +54,32 @@ Music::Music()
 
 MusicFileData gMusicFileData[MusicFile::NUM_MUSIC_FILES];
 
-bool Music::TodLoadMusic(MusicFile theMusicFile, const std::string& theFileName)
+struct MusicLoadEntry
+{
+	MusicFile					mMusicFile;
+	std::string_view			mFileName;
+};
+
+static constexpr int MUSIC_LOADING_TASK_WEIGHT = 3500;
+static constexpr MusicLoadEntry MUSIC_LOADING_FILES[] = {
+	{MusicFile::MUSIC_FILE_DRUMS, "sounds/mainmusic.mo3"},
+	{MusicFile::MUSIC_FILE_CREDITS_ZOMBIES_ON_YOUR_LAWN, "sounds/ZombiesOnYourLawn.ogg"}
+};
+
+const int Music::MUSIC_LOADING_TASKS = MUSIC_LOADING_TASK_WEIGHT * static_cast<int>(sizeof(MUSIC_LOADING_FILES) / sizeof(MUSIC_LOADING_FILES[0]));
+
+bool Music::TodLoadMusic(MusicFile theMusicFile, std::string_view theFileName)
 {
 	Mix_Music* aHMusic = 0;
 	SDLMusicInterface* anSDL = (SDLMusicInterface*)mApp->mMusicInterface;
+	std::string aFileName(theFileName);
 	std::string anExt;
 
-	size_t aDot = theFileName.rfind('.');
+	size_t aDot = aFileName.rfind('.');
 	if (aDot != std::string::npos)
-		anExt = StringToLower(theFileName.substr(aDot + 1));
+		anExt = StringToLower(aFileName.substr(aDot + 1));
 
-	PFILE* pFile = p_fopen(theFileName.c_str(), "rb");
+	PFILE* pFile = p_fopen(aFileName.c_str(), "rb");
 	if (pFile == nullptr)
 		return false;
 
@@ -151,7 +166,7 @@ void Music::SetupVolumeForTune(MusicTune theMusicTune, float theDrumsVolume, flo
 	}
 }
 
-void Music::LoadSong(MusicFile theMusicFile, const std::string& theFileName)
+void Music::LoadSong(MusicFile theMusicFile, std::string_view theFileName)
 {
 	TodHesitationTrace("preloadsong");
 	if (!TodLoadMusic(theMusicFile, theFileName))
@@ -161,7 +176,7 @@ void Music::LoadSong(MusicFile theMusicFile, const std::string& theFileName)
 	}
 	else
 	{
-		TodHesitationTrace("song '%s'", theFileName.c_str());
+		TodHesitationTrace("song '%.*s'", static_cast<int>(theFileName.size()), theFileName.data());
 	}
 }
 
@@ -173,20 +188,11 @@ void Music::MusicTitleScreenInit()
 
 void Music::MusicInit()
 {
-#ifdef PVZ_DEBUG
-	int aNumLoadingTasks = mApp->mCompletedLoadingThreadTasks + GetNumLoadingTasks();
-#endif
-
-	LoadSong(MusicFile::MUSIC_FILE_DRUMS, "sounds/mainmusic.mo3");
-	mApp->mCompletedLoadingThreadTasks += 3500;
-
-	LoadSong(MusicFile::MUSIC_FILE_CREDITS_ZOMBIES_ON_YOUR_LAWN, "sounds/ZombiesOnYourLawn.ogg");
-	mApp->mCompletedLoadingThreadTasks += 3500;
-
-#ifdef PVZ_DEBUG
-	if (mApp->mCompletedLoadingThreadTasks != aNumLoadingTasks)
-		TodTrace("Didn't calculate loading task count correctly!!!!");
-#endif
+	for (const auto& aMusic : MUSIC_LOADING_FILES)
+	{
+		LoadSong(aMusic.mMusicFile, aMusic.mFileName);
+		mApp->mCompletedLoadingThreadTasks += MUSIC_LOADING_TASK_WEIGHT;
+	}
 }
 
 void Music::MusicCreditScreenInit()
@@ -698,9 +704,4 @@ void Music::GameMusicPause(bool thePause)
 		}
 		mPaused = false;
 	}
-}
-
-int Music::GetNumLoadingTasks()
-{
-	return 3500 * 1;
 }
