@@ -769,6 +769,51 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
             }
         }
 
+        // Force the SDL window's internal UIKit window and view to valid
+        // geometry before GL context creation.  SDL_GL_CreateContext reads
+        // the CAEAGLLayer bounds from the SDL view; if they are still 0x0
+        // the EAGL context creation fails with "Failed to create OpenGL ES
+        // drawable".
+        {
+            CGSize fb;
+            iOS_MeasureScreenSize(&fb);
+            if (iOS_SizeIsValid(fb)) {
+                // Landscape: width > height
+                if (fb.width < fb.height) {
+                    CGFloat t = fb.width;
+                    fb.width = fb.height;
+                    fb.height = t;
+                }
+                const CGRect fbFrame = CGRectMake(0, 0, fb.width, fb.height);
+
+                SDL_SysWMinfo winfo;
+                SDL_VERSION(&winfo.version);
+                if (SDL_GetWindowWMInfo(window, &winfo)) {
+#if defined(SDL_SYSWM_UIKIT)
+                    if (winfo.subsystem == SDL_SYSWM_UIKIT) {
+                        UIWindow* uiWin = winfo.info.uikit.window;
+                        if (uiWin && !iOS_SizeIsValid(uiWin.bounds.size)) {
+                            uiWin.frame = fbFrame;
+                            [uiWin makeKeyAndVisible];
+                            [uiWin layoutIfNeeded];
+                            iOS_WriteLog("SDL_GL_FORCE_WIN",
+                                "forced SDL UIWindow frame");
+                        }
+                        UIView* uiView = winfo.info.uikit.view;
+                        if (uiView && !iOS_SizeIsValid(uiView.bounds.size)) {
+                            uiView.frame = fbFrame;
+                            uiView.layer.bounds = CGRectMake(0, 0, fb.width, fb.height);
+                            [uiView setNeedsLayout];
+                            [uiView layoutIfNeeded];
+                            iOS_WriteLog("SDL_GL_FORCE_VIEW",
+                                "forced SDL view frame + layer bounds");
+                        }
+                    }
+#endif
+                }
+            }
+        }
+
         // Spin the run loop so CoreAnimation commits layout before EAGL allocation.
         iOS_PumpRunLoopMs(50);
 
