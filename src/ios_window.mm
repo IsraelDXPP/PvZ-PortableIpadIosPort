@@ -560,6 +560,43 @@ static void iOS_SwizzledViewSetBounds(id self, SEL _cmd, CGRect bounds)
 
 static BOOL gSwizzleActive = NO;
 
+// ---------------------------------------------------------------------------
+// UIScreen bounds swizzle — override the broken 0×0 that iOS 9 iPad returns
+// so that SDL (and any UIKit code) always sees valid geometry.
+// ---------------------------------------------------------------------------
+
+static CGRect (*gOrigUIScreenBounds)(id, SEL);
+
+static CGRect iOS_SwizzledUIScreenBounds(id self, SEL _cmd)
+{
+    CGRect orig = gOrigUIScreenBounds(self, _cmd);
+    if (orig.size.width <= 0.0f || orig.size.height <= 0.0f ||
+        isnan(orig.size.width) || isnan(orig.size.height)) {
+        return CGRectMake(0, 0, 1024, 768);
+    }
+    return orig;
+}
+
+static void iOS_SwizzleUIScreenBounds(void)
+{
+    static BOOL installed = NO;
+    if (installed) return;
+    installed = YES;
+
+    Method m = class_getInstanceMethod([UIScreen class], @selector(bounds));
+    gOrigUIScreenBounds = (CGRect (*)(id, SEL))method_getImplementation(m);
+    method_setImplementation(m, (IMP)iOS_SwizzledUIScreenBounds);
+}
+
+static void iOS_UnswizzleUIScreenBounds(void)
+{
+    if (gOrigUIScreenBounds) {
+        Method m = class_getInstanceMethod([UIScreen class], @selector(bounds));
+        method_setImplementation(m, (IMP)gOrigUIScreenBounds);
+        gOrigUIScreenBounds = nil;
+    }
+}
+
 static void iOS_SwizzleSetPosition(void)
 {
     if (gSwizzleActive) return;
@@ -618,6 +655,7 @@ extern "C" SDL_Window* iOS_CreateWindowSafe(
 {
     // Install geometry swizzles BEFORE any UIKit / SDL layer manipulation.
     iOS_SwizzleSetPosition();
+    iOS_SwizzleUIScreenBounds();
 
     // UIScreen is not reliable until the app is active on iOS 9 iPad.
     iOS_WaitUntilApplicationActive(10000);
