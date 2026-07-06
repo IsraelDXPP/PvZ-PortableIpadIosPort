@@ -905,6 +905,8 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
 
         // ------------------------------------------------------------------
         // Step 3: If no CAEAGLLayer exists in the hierarchy, create one.
+        // Create a dedicated UIWindow from UIScreen to guarantee valid bounds,
+        // and disable Auto Layout so our explicit frame is respected.
         // ------------------------------------------------------------------
         if (!eaglView) {
             static Class sEAGLViewClass = nil;
@@ -923,40 +925,70 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
             }
 
             if (sEAGLViewClass) {
-                UIWindow* targetWin = nil;
-                for (UIWindow* win in [UIApplication sharedApplication].windows) {
-                    if (iOS_SizeIsValid(win.bounds.size)) {
-                        targetWin = win;
-                        break;
-                    }
+                // Create a fresh UIWindow directly from UIScreen so it gets
+                // valid bounds on iOS 9 iPad Mini 1 (A5 chip, 32-bit).
+                UIScreen* mainScreen = [UIScreen mainScreen];
+                CGRect screenBounds = mainScreen.bounds;
+                // Ensure landscape
+                if (screenBounds.size.width < screenBounds.size.height) {
+                    CGFloat tmp = screenBounds.size.width;
+                    screenBounds.size.width = screenBounds.size.height;
+                    screenBounds.size.height = tmp;
                 }
-                if (!targetWin) targetWin = gForcedUIWindow;
+                if (!iOS_SizeIsValid(screenBounds.size))
+                    screenBounds = CGRectMake(0, 0, fb.width, fb.height);
 
-                if (targetWin) {
-                    eaglView = [[sEAGLViewClass alloc] initWithFrame:fbFrame];
-                    UIView* parent = targetWin.rootViewController.view ?: targetWin;
-                    [parent addSubview:eaglView];
-                    // Force the view to be laid out so CoreAnimation
-                    // prepares a drawable surface for the layer.
-                    [eaglView setNeedsLayout];
-                    [eaglView layoutIfNeeded];
-                    iOS_WriteLog("EAGL_VIEW_CREATED", "runtime CAEAGLLayer view");
-                }
+                UIWindow* eaglWindow = [[UIWindow alloc] initWithFrame:screenBounds];
+                UIViewController* eaglVC = [[UIViewController alloc] init];
+                eaglVC.view.frame = screenBounds;
+                eaglVC.view.backgroundColor = [UIColor blackColor];
+                eaglWindow.rootViewController = eaglVC;
+                [eaglWindow makeKeyAndVisible];
+                iOS_PumpRunLoopMs(50);
+
+                eaglView = [[sEAGLViewClass alloc] initWithFrame:screenBounds];
+                // Disable Auto Layout so our frame is not overridden
+                eaglView.translatesAutoresizingMaskIntoConstraints = YES;
+                eaglView.autoresizingMask = UIViewAutoresizingNone;
+                [eaglVC.view addSubview:eaglView];
+                [eaglVC.view bringSubviewToFront:eaglView];
+                // Let UIKit commit layout
+                [eaglVC.view setNeedsLayout];
+                [eaglVC.view layoutIfNeeded];
+
+                char lbuf[128];
+                snprintf(lbuf, sizeof(lbuf), "runtime CAEAGLLayer view win=%.0fx%.0f view=%.0fx%.0f",
+                    (double)screenBounds.size.width, (double)screenBounds.size.height,
+                    (double)eaglView.frame.size.width, (double)eaglView.frame.size.height);
+                iOS_WriteLog("EAGL_VIEW_CREATED", lbuf);
             }
         }
 
         // ------------------------------------------------------------------
-        // Step 4: Force the found/created view's frame and layer bounds.
+        // Step 4: Force the found/created view's frame and layer bounds,
+        // then use CATransaction to commit immediately before renderbufferStorage.
         // ------------------------------------------------------------------
         CAEAGLLayer* eaglLayer = nil;
         if (eaglView) {
+            // Disable autoresizing so parent layout can't stomp our frame
+            eaglView.translatesAutoresizingMaskIntoConstraints = YES;
+            eaglView.autoresizingMask = UIViewAutoresizingNone;
+
+            // Set both frame (position+size in parent coords) and layer bounds
             eaglView.frame = fbFrame;
+
+            // Force CATransaction to commit the frame immediately
+            [CATransaction begin];
+            [CATransaction setValue:(id)kCFBooleanTrue forKey:kCATransactionDisableActions];
             eaglView.layer.bounds = CGRectMake(0, 0, fb.width, fb.height);
+            [CATransaction commit];
+
             [eaglView setNeedsLayout];
             [eaglView layoutIfNeeded];
 
             if ([eaglView.layer isKindOfClass:[CAEAGLLayer class]]) {
                 eaglLayer = (CAEAGLLayer*)eaglView.layer;
+                eaglLayer.opaque = YES;
                 eaglLayer.drawableProperties = @{
                     kEAGLDrawablePropertyRetainedBacking: @NO,
                     kEAGLDrawablePropertyColorFormat: kEAGLColorFormatRGBA8
@@ -965,32 +997,50 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
         }
 
         // Let CoreAnimation commit the layer changes before querying it.
+        // Wait in a loop until bounds are actually non-zero (up to 500ms).
         if (eaglLayer) {
             char lb[64];
             iOS_LogSize(lb, sizeof(lb), "layerBnd", eaglLayer.bounds.size);
             iOS_WriteLog("LAYER_BEFORE", lb);
+
+            for (int wi = 0; wi < 10 && !iOS_SizeIsValid(eaglLayer.bounds.size); wi++) {
+                iOS_PumpRunLoopMs(50);
+                // Re-apply bounds if they got reset
+                [CATransaction begin];
+                [CATransaction setValue:(id)kCFBooleanTrue forKey:kCATransactionDisableActions];
+                eaglLayer.bounds = CGRectMake(0, 0, fb.width, fb.height);
+                [CATransaction commit];
+            }
+
+            iOS_LogSize(lb, sizeof(lb), "layerBnd", eaglLayer.bounds.size);
+            iOS_WriteLog("LAYER_AFTER", lb);
+
+            // If still 0x0, force it directly on the model layer
+            if (!iOS_SizeIsValid(eaglLayer.bounds.size)) {
+                eaglLayer.bounds = CGRectMake(0, 0, fb.width, fb.height);
+                [CATransaction flush];
+                iOS_PumpRunLoopMs(50);
+                iOS_LogSize(lb, sizeof(lb), "layerBnd_force", eaglLayer.bounds.size);
+                iOS_WriteLog("LAYER_FORCE", lb);
+            }
         }
-        iOS_PumpRunLoopMs(100);
 
         // ------------------------------------------------------------------
         // Step 5: Try SDL_GL_CreateContext first — if we have a valid
         // CAEAGLLayer with non-zero bounds, SDL might succeed now.
         // ------------------------------------------------------------------
         SDL_GLContext ctx = nullptr;
-        if (eaglLayer) {
+        if (eaglLayer && iOS_SizeIsValid(eaglLayer.bounds.size)) {
             char lb[64];
-            iOS_LogSize(lb, sizeof(lb), "layerBnd", eaglLayer.bounds.size);
-            iOS_WriteLog("LAYER_AFTER", lb);
-
-            CGSize ds = [eaglLayer drawableSize];
-            char dsb[64];
-            iOS_LogSize(dsb, sizeof(dsb), "drawSize", ds);
-            iOS_WriteLog("DRAWABLE_SIZE", dsb);
+            iOS_LogSize(lb, sizeof(lb), "layerBnd_final", eaglLayer.bounds.size);
+            iOS_WriteLog("LAYER_FINAL", lb);
 
             ctx = SDL_GL_CreateContext(window);
             if (ctx) {
                 iOS_WriteLog("SDL_GL_CREATECONTEXT", "SDL_GL_CreateContext succeeded after layout fix");
             }
+        } else if (eaglLayer) {
+            iOS_WriteLog("SDL_GL_SKIP", "layer bounds still 0x0 — skipping SDL_GL_CreateContext");
         }
 
         // ------------------------------------------------------------------
