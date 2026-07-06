@@ -763,13 +763,34 @@ extern "C" SDL_Window* iOS_CreateWindowSafe(
 }
 
 
+/// Recursively search a view's subviews for one whose layer is a CAEAGLLayer.
+static UIView* iOS_FindEAGLViewRecursive(UIView* view)
+{
+    if ([view.layer isKindOfClass:[CAEAGLLayer class]])
+        return view;
+    for (UIView* sv in view.subviews) {
+        UIView* found = iOS_FindEAGLViewRecursive(sv);
+        if (found) return found;
+    }
+    return nil;
+}
+
 /// Safe wrapper around SDL_GL_CreateContext for iOS.
 ///
-/// Continues the NaN-suppression swizzle started by iOS_CreateWindowSafe
-/// so that setSDLWindow: / layoutSubviews inside GL context creation don't
-/// trigger a CALayerInvalidGeometry exception on iOS 9.
+/// Strategy: SDL_GetWindowWMInfo always returns false in this SDL port, so
+/// we cannot access the SDL_uikitview through the normal API.  Instead:
+///   1. Pump the run loop to let UIKit settle.
+///   2. Force all UIWindows to valid frames.
+///   3. Recursively search ALL windows for a view whose layer is a CAEAGLLayer
+///      (the SDL_uikitview, if one exists).
+///   4. If found, force its frame/bounds, then try SDL_GL_CreateContext.
+///   5. If SDL fails (or no CAEAGLLayer exists — e.g. SDL_CreateWindowFrom
+///      path), create a UIView subclass at runtime with +layerClass returning
+///      [CAEAGLLayer class], add it to the window hierarchy, and create our
+///      own EAGLContext from it.
+///   6. Set the context as current; return it as an SDL_GLContext.
 ///
-/// Returns the context, or nullptr on failure (with SDL_GetError() logged).
+/// Returns the context, or nullptr on failure.
 extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
 {
     @try {
@@ -819,160 +840,148 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
             }
         }
 
-        // Force the SDL window's internal UIKit window and view to valid
-        // geometry before GL context creation.  SDL_GL_CreateContext reads
-        // the CAEAGLLayer bounds from the SDL view; if they are still 0x0
-        // the EAGL context creation fails with "Failed to create OpenGL ES
-        // drawable".
-        {
-            CGSize fb;
-            iOS_MeasureScreenSize(&fb);
-            if (iOS_SizeIsValid(fb)) {
-                // Landscape: width > height
-                if (fb.width < fb.height) {
-                    CGFloat t = fb.width;
-                    fb.width = fb.height;
-                    fb.height = t;
-                }
-                const CGRect fbFrame = CGRectMake(0, 0, fb.width, fb.height);
+        // ------------------------------------------------------------------
+        // Step 1: Force all UIWindows to valid frames.
+        // ------------------------------------------------------------------
+        CGSize fb;
+        iOS_MeasureScreenSize(&fb);
+        if (!iOS_SizeIsValid(fb))
+            fb = CGSizeMake(1024, 768);
+        if (fb.width < fb.height) {
+            CGFloat t = fb.width; fb.width = fb.height; fb.height = t;
+        }
+        const CGRect fbFrame = CGRectMake(0, 0, fb.width, fb.height);
 
-                SDL_SysWMinfo winfo;
-                SDL_VERSION(&winfo.version);
-                if (SDL_GetWindowWMInfo(window, &winfo)) {
-#if defined(SDL_SYSWM_UIKIT)
-                    if (winfo.subsystem == SDL_SYSWM_UIKIT) {
-                        UIWindow* uiWin = winfo.info.uikit.window;
-                        if (uiWin && !iOS_SizeIsValid(uiWin.bounds.size)) {
-                            uiWin.frame = fbFrame;
-                            [uiWin makeKeyAndVisible];
-                            [uiWin layoutIfNeeded];
-                            iOS_WriteLog("SDL_GL_FORCE_WIN",
-                                "forced SDL UIWindow frame");
-                        }
-                        UIView* uiView = winfo.info.uikit.view;
-                        if (uiView && !iOS_SizeIsValid(uiView.bounds.size)) {
-                            uiView.frame = fbFrame;
-                            uiView.layer.bounds = CGRectMake(0, 0, fb.width, fb.height);
-                            [uiView setNeedsLayout];
-                            [uiView layoutIfNeeded];
-                            iOS_WriteLog("SDL_GL_FORCE_VIEW",
-                                "forced SDL view frame + layer bounds");
-                        }
-                    }
-#endif
-                }
+        for (UIWindow* win in [UIApplication sharedApplication].windows) {
+            if (!iOS_SizeIsValid(win.bounds.size) || !iOS_SizeIsValid(win.frame.size)) {
+                win.frame = fbFrame;
+                [win makeKeyAndVisible];
+                [win layoutIfNeeded];
+            }
+            UIView* rv = win.rootViewController.view;
+            if (rv && (!iOS_SizeIsValid(rv.bounds.size) || !iOS_SizeIsValid(rv.frame.size))) {
+                rv.frame = fbFrame;
+                [rv setNeedsLayout];
+                [rv layoutIfNeeded];
             }
         }
 
-        // Spin the run loop so CoreAnimation commits layout before EAGL allocation.
+        // Spin the run loop so CoreAnimation commits layout.
         iOS_PumpRunLoopMs(50);
 
-        // SDL_GetWindowWMInfo always returns false in this SDL port, so
-        // we cannot access the internal SDL_uikitview through the normal
-        // API.  Instead, search the application window hierarchy for a
-        // view whose layer is a CAEAGLLayer — that is the SDL view.
-        // Force its frame and layer bounds to 1024×768, create our own
-        // EAGLContext, and set it up so that SDL_GL_SwapWindow works.
+        // ------------------------------------------------------------------
+        // Step 2: Search ALL windows recursively for a view whose layer IS
+        // a CAEAGLLayer.  This is the SDL_uikitview (if SDL_CreateWindow was
+        // used) or our custom view (if we've already created one).
+        // ------------------------------------------------------------------
+        UIView* eaglView = nil;
         {
-            Class viewClass = NSClassFromString(@"SDL_uikitview");
-            if (!viewClass)
-                viewClass = [UIView class];  // fallback
-
             for (UIWindow* win in [UIApplication sharedApplication].windows) {
-                // Skip our forced fallback window.
-                if (win == gForcedUIWindow) continue;
-
-                // Accept any window whose root view controller matches.
-                UIView* targetView = nil;
-                for (UIView* sv in win.subviews) {
-                    if (viewClass == [UIView class] ||
-                        [sv isKindOfClass:viewClass]) {
-                        targetView = sv;
-                        break;
-                    }
-                }
-                if (!targetView && win.rootViewController.view) {
-                    // Try the root VC's view instead.
-                    targetView = win.rootViewController.view;
-                }
-
-                if (targetView) {
-                    CGSize ts;
-                    iOS_MeasureScreenSize(&ts);
-                    if (iOS_SizeIsValid(ts)) {
-                        if (ts.width < ts.height) {
-                            CGFloat tmp = ts.width;
-                            ts.width = ts.height;
-                            ts.height = tmp;
-                        }
-
-                        targetView.frame = CGRectMake(0, 0, ts.width, ts.height);
-                        targetView.layer.bounds = CGRectMake(0, 0, ts.width, ts.height);
-
-                        [targetView setNeedsLayout];
-                        [targetView layoutIfNeeded];
-
-                        CAEAGLLayer* eaglLayer = (CAEAGLLayer*)targetView.layer;
-                        eaglLayer.drawableProperties = @{
-                            kEAGLDrawablePropertyRetainedBacking: @NO,
-                            kEAGLDrawablePropertyColorFormat: kEAGLColorFormatRGBA8
-                        };
-
-                        char lbuf[96];
-                        snprintf(lbuf, sizeof(lbuf), "found view=%s layer=%.0fx%.0f",
-                            object_getClassName(targetView),
-                            eaglLayer.bounds.size.width,
-                            eaglLayer.bounds.size.height);
-                        iOS_WriteLog("SDL_VIEW_SETUP", lbuf);
-                        break;
-                    }
+                eaglView = iOS_FindEAGLViewRecursive(win);
+                if (eaglView) break;
+                if (win.rootViewController.view) {
+                    eaglView = iOS_FindEAGLViewRecursive(win.rootViewController.view);
+                    if (eaglView) break;
                 }
             }
         }
 
-        SDL_GLContext ctx = SDL_GL_CreateContext(window);
+        // ------------------------------------------------------------------
+        // Step 3: If no CAEAGLLayer exists in the hierarchy, create one.
+        // ------------------------------------------------------------------
+        if (!eaglView) {
+            static Class sEAGLViewClass = nil;
+            if (!sEAGLViewClass) {
+                sEAGLViewClass = objc_allocateClassPair([UIView class], "PvZEAGLView", 0);
+                if (sEAGLViewClass) {
+                    IMP layerClassImp = imp_implementationWithBlock(^Class{
+                        return [CAEAGLLayer class];
+                    });
+                    Method layerMethod = class_getClassMethod([UIView class], @selector(layerClass));
+                    const char* typeEnc = method_getTypeEncoding(layerMethod);
+                    class_addMethod(object_getClass(sEAGLViewClass),
+                                    @selector(layerClass), layerClassImp, typeEnc);
+                    objc_registerClassPair(sEAGLViewClass);
+                }
+            }
+
+            if (sEAGLViewClass) {
+                UIWindow* targetWin = nil;
+                for (UIWindow* win in [UIApplication sharedApplication].windows) {
+                    if (iOS_SizeIsValid(win.bounds.size)) {
+                        targetWin = win;
+                        break;
+                    }
+                }
+                if (!targetWin) targetWin = gForcedUIWindow;
+
+                if (targetWin) {
+                    eaglView = [[sEAGLViewClass alloc] initWithFrame:fbFrame];
+                    UIView* parent = targetWin.rootViewController.view ?: targetWin;
+                    [parent addSubview:eaglView];
+                    // Force the view to be laid out so CoreAnimation
+                    // prepares a drawable surface for the layer.
+                    [eaglView setNeedsLayout];
+                    [eaglView layoutIfNeeded];
+                    iOS_WriteLog("EAGL_VIEW_CREATED", "runtime CAEAGLLayer view");
+                }
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // Step 4: Force the found/created view's frame and layer bounds.
+        // ------------------------------------------------------------------
+        CAEAGLLayer* eaglLayer = nil;
+        if (eaglView) {
+            eaglView.frame = fbFrame;
+            eaglView.layer.bounds = CGRectMake(0, 0, fb.width, fb.height);
+            [eaglView setNeedsLayout];
+            [eaglView layoutIfNeeded];
+
+            if ([eaglView.layer isKindOfClass:[CAEAGLLayer class]]) {
+                eaglLayer = (CAEAGLLayer*)eaglView.layer;
+                eaglLayer.drawableProperties = @{
+                    kEAGLDrawablePropertyRetainedBacking: @NO,
+                    kEAGLDrawablePropertyColorFormat: kEAGLColorFormatRGBA8
+                };
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // Step 5: Try SDL_GL_CreateContext first — if we have a valid
+        // CAEAGLLayer with non-zero bounds, SDL might succeed now.
+        // ------------------------------------------------------------------
+        SDL_GLContext ctx = nullptr;
+        if (eaglLayer) {
+            ctx = SDL_GL_CreateContext(window);
+            if (ctx) {
+                iOS_WriteLog("SDL_GL_CREATECONTEXT", "SDL_GL_CreateContext succeeded after layout fix");
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // Step 6: If SDL failed, create our own EAGLContext from the layer.
+        // ------------------------------------------------------------------
+        if (!ctx && eaglLayer) {
+            EAGLContext* eaglCtx = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES2];
+            if (eaglCtx) {
+                [EAGLContext setCurrentContext:eaglCtx];
+                GLuint rb;
+                glGenRenderbuffers(1, &rb);
+                glBindRenderbuffer(GL_RENDERBUFFER, rb);
+                if ([eaglCtx renderbufferStorage:GL_RENDERBUFFER fromDrawable:eaglLayer]) {
+                    ctx = (__bridge SDL_GLContext)eaglCtx;
+                    iOS_WriteLog("EAGL_CUSTOM", "custom EAGLContext created OK");
+                } else {
+                    iOS_WriteLog("EAGL_CUSTOM_FAIL", "renderbufferStorage returned NO");
+                }
+            } else {
+                iOS_WriteLog("EAGL_CUSTOM_FAIL", "EAGLContext alloc failed");
+            }
+        }
 
         if (!ctx) {
-            const char* sdlErr = SDL_GetError();
-            iOS_WriteLog("SDL_GL_CREATECONTEXT_FAIL",
-                sdlErr ? sdlErr : "SDL_GL_CreateContext returned NULL");
-
-            // Fallback: try to create our own EAGLContext from the SDL
-            // view's layer directly, bypassing SDL's broken creation.
-            Class sdlClass = NSClassFromString(@"SDL_uikitview");
-            if (!sdlClass) sdlClass = [UIView class];
-            for (UIWindow* win in [UIApplication sharedApplication].windows) {
-                if (win == gForcedUIWindow) continue;
-                for (UIView* sv in win.subviews) {
-                    if (![sv isKindOfClass:sdlClass] && sdlClass != [UIView class])
-                        continue;
-                    CAEAGLLayer* el = (CAEAGLLayer*)sv.layer;
-                    if (![el isKindOfClass:[CAEAGLLayer class]])
-                        continue;
-                    el.drawableProperties = @{
-                        kEAGLDrawablePropertyRetainedBacking: @NO,
-                        kEAGLDrawablePropertyColorFormat: kEAGLColorFormatRGBA8
-                    };
-                    EAGLContext* eaglCtx = [[EAGLContext alloc]
-                        initWithAPI:kEAGLRenderingAPIOpenGLES2];
-                    if (eaglCtx) {
-                        [EAGLContext setCurrentContext:eaglCtx];
-                        GLuint rb;
-                        glGenRenderbuffers(1, &rb);
-                        glBindRenderbuffer(GL_RENDERBUFFER, rb);
-                        [eaglCtx renderbufferStorage:GL_RENDERBUFFER
-                                        fromDrawable:el];
-                        // Store context on the view so SDL_GL_SwapWindow
-                        // can find it (via KVC).
-                        [sv setValue:eaglCtx forKey:@"context"];
-                        ctx = (__bridge SDL_GLContext)eaglCtx;
-                        iOS_WriteLog("EAGL_FALLBACK",
-                            "custom EAGLContext created OK");
-                    }
-                    break;
-                }
-                if (ctx) break;
-            }
+            iOS_WriteLog("CTX_FAIL", "no GL context could be created (SDL or custom)");
         }
 
         if (ctx) {
@@ -1020,6 +1029,30 @@ extern "C" int iOS_RunGameAfterActivation(int (*runGameFn)(int, char**), int arg
     return exitCode;
 }
 
+
+// ---------------------------------------------------------------------------
+// SDL function overrides — static linking means our .o symbols take
+// precedence over the SDL2 static library.
+// ---------------------------------------------------------------------------
+
+/// Override SDL_GL_SwapWindow to use our custom EAGLContext (stored as the
+/// current context via [EAGLContext setCurrentContext:]).
+extern "C" void SDL_GL_SwapWindow(SDL_Window* window)
+{
+    @autoreleasepool {
+        EAGLContext* ctx = [EAGLContext currentContext];
+        if (ctx) {
+            [ctx presentRenderbuffer:GL_RENDERBUFFER];
+        }
+    }
+}
+
+/// Override SDL_GL_SetSwapInterval — iOS vsync is handled automatically by
+/// presentRenderbuffer:; no special setup needed.
+extern "C" int SDL_GL_SetSwapInterval(int interval)
+{
+    return 0;
+}
 
 /// Top-level @try/@catch wrapper for the game's entry-point function.
 /// Catches any ObjC NSException that propagates up from the game loop
