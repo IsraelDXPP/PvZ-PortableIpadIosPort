@@ -947,12 +947,29 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
             }
         }
 
+        // Let CoreAnimation commit the layer changes before querying it.
+        if (eaglLayer) {
+            char lb[64];
+            iOS_LogSize(lb, sizeof(lb), "layerBnd", eaglLayer.bounds.size);
+            iOS_WriteLog("LAYER_BEFORE", lb);
+        }
+        iOS_PumpRunLoopMs(100);
+
         // ------------------------------------------------------------------
         // Step 5: Try SDL_GL_CreateContext first — if we have a valid
         // CAEAGLLayer with non-zero bounds, SDL might succeed now.
         // ------------------------------------------------------------------
         SDL_GLContext ctx = nullptr;
         if (eaglLayer) {
+            char lb[64];
+            iOS_LogSize(lb, sizeof(lb), "layerBnd", eaglLayer.bounds.size);
+            iOS_WriteLog("LAYER_AFTER", lb);
+
+            CGSize ds = [eaglLayer drawableSize];
+            char dsb[64];
+            iOS_LogSize(dsb, sizeof(dsb), "drawSize", ds);
+            iOS_WriteLog("DRAWABLE_SIZE", dsb);
+
             ctx = SDL_GL_CreateContext(window);
             if (ctx) {
                 iOS_WriteLog("SDL_GL_CREATECONTEXT", "SDL_GL_CreateContext succeeded after layout fix");
@@ -970,6 +987,12 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
                 glGenRenderbuffers(1, &rb);
                 glBindRenderbuffer(GL_RENDERBUFFER, rb);
                 if ([eaglCtx renderbufferStorage:GL_RENDERBUFFER fromDrawable:eaglLayer]) {
+                    GLint rbW = 0, rbH = 0;
+                    glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_WIDTH, &rbW);
+                    glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_HEIGHT, &rbH);
+                    char rbb[64];
+                    snprintf(rbb, sizeof(rbb), "rb=%dx%d", rbW, rbH);
+                    iOS_WriteLog("GL_RB_SIZE", rbb);
                     ctx = (__bridge SDL_GLContext)eaglCtx;
                     iOS_WriteLog("EAGL_CUSTOM", "custom EAGLContext created OK");
                 } else {
