@@ -37,8 +37,13 @@ void* iOS_CreateGLContextSafe(struct SDL_Window* window);
 
 /* Custom swap — called from GLInterface::Flush() on iOS instead of
    SDL_GL_SwapWindow (which uses window->driverdata.context that may not
-   be set when we bypass SDL_GL_CreateContext). */
+   be set when we bypass SDL_GL_CreateContext).
+   Declared inside Sexy namespace for C++ linkage match. */
+#ifdef __cplusplus
+namespace Sexy {
 void iOS_SwapWindow(struct SDL_Window* window);
+}
+#endif
 
 /* Top-level @try/@catch wrapper around the game's entry-point function.
    Catches any ObjC NSException that propagates up from the game loop

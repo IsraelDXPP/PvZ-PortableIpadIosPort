@@ -1036,7 +1036,8 @@ extern "C" int iOS_RunGameAfterActivation(int (*runGameFn)(int, char**), int arg
 // that we never set when bypassing SDL_GL_CreateContext).
 // ---------------------------------------------------------------------------
 
-extern "C" void iOS_SwapWindow(SDL_Window* window)
+namespace Sexy {
+void iOS_SwapWindow(SDL_Window* window)
 {
     @autoreleasepool {
         EAGLContext* ctx = [EAGLContext currentContext];
@@ -1044,6 +1045,7 @@ extern "C" void iOS_SwapWindow(SDL_Window* window)
             [ctx presentRenderbuffer:GL_RENDERBUFFER];
         }
     }
+}
 }
 
 /// Top-level @try/@catch wrapper for the game's entry-point function.
