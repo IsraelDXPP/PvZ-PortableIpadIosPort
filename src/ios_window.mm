@@ -58,7 +58,7 @@ static void iOS_LogSize(char* buf, size_t bufSize, const char* label, CGSize siz
     if (isnan(size.width) || isnan(size.height)) {
         snprintf(buf, bufSize, "%s=nan", label);
     } else {
-        snprintf(buf, bufSize, "%s=%.0fx%.0f", label, size.width, size.height);
+        snprintf(buf, bufSize, "%s=%.0fx%.0f", label, (double)size.width, (double)size.height);
     }
 }
 
@@ -701,38 +701,42 @@ extern "C" SDL_Window* iOS_CreateWindowSafe(
         // iOS_FindActiveWindow / iOS_WaitForWindowLayout have something
         // to work with, and the EAGL context can be created.
         if (result) {
-            CGSize fbSize;
-            iOS_MeasureScreenSize(&fbSize);
-            if (iOS_SizeIsValid(fbSize)) {
-                // Landscape: ensure width > height
-                if (fbSize.width < fbSize.height) {
-                    CGFloat t = fbSize.width;
-                    fbSize.width = fbSize.height;
-                    fbSize.height = t;
+            UIWindow* sdlUIWin = iOS_GetSDLUIWindow(result);
+            if (!sdlUIWin || !iOS_SizeIsValid(sdlUIWin.bounds.size) || !iOS_SizeIsValid(sdlUIWin.frame.size)) {
+                CGSize fbSize;
+                iOS_MeasureScreenSize(&fbSize);
+                if (iOS_SizeIsValid(fbSize)) {
+                    // Landscape: ensure width > height
+                    if (fbSize.width < fbSize.height) {
+                        CGFloat t = fbSize.width;
+                        fbSize.width = fbSize.height;
+                        fbSize.height = t;
+                    }
+                    CGRect fbFrame = CGRectMake(0, 0, fbSize.width, fbSize.height);
+
+                    gForcedUIWindow = [[UIWindow alloc] initWithFrame:fbFrame];
+                    UIViewController* fbVC = [[UIViewController alloc] init];
+                    fbVC.view.frame = fbFrame;
+                    gForcedUIWindow.rootViewController = fbVC;
+                    [gForcedUIWindow makeKeyAndVisible];
+                    [gForcedUIWindow layoutIfNeeded];
+
+                    // Also force the SDL window's internal UIWindow frame
+                    if (sdlUIWin) {
+                        sdlUIWin.frame = fbFrame;
+                        [sdlUIWin makeKeyAndVisible];
+                        [sdlUIWin layoutIfNeeded];
+                    }
+
+                    SDL_SetWindowSize(result, (int)fbSize.width, (int)fbSize.height);
+
+                    char dbg[128];
+                    snprintf(dbg, sizeof(dbg), "forced UIWindow %.0fx%.0f",
+                        (double)fbSize.width, (double)fbSize.height);
+                    iOS_WriteLog("SDL_FORCED_WINDOW", dbg);
                 }
-                CGRect fbFrame = CGRectMake(0, 0, fbSize.width, fbSize.height);
-
-                gForcedUIWindow = [[UIWindow alloc] initWithFrame:fbFrame];
-                UIViewController* fbVC = [[UIViewController alloc] init];
-                fbVC.view.frame = fbFrame;
-                gForcedUIWindow.rootViewController = fbVC;
-                [gForcedUIWindow makeKeyAndVisible];
-                [gForcedUIWindow layoutIfNeeded];
-
-                // Also force the SDL window's internal UIWindow frame
-                UIWindow* sdlUIWin = iOS_GetSDLUIWindow(result);
-                if (sdlUIWin && !iOS_SizeIsValid(sdlUIWin.bounds.size)) {
-                    sdlUIWin.frame = fbFrame;
-                    [sdlUIWin makeKeyAndVisible];
-                    [sdlUIWin layoutIfNeeded];
-                }
-
-                SDL_SetWindowSize(result, (int)fbSize.width, (int)fbSize.height);
-
-                char dbg[128];
-                snprintf(dbg, sizeof(dbg), "forced UIWindow %.0fx%.0f",
-                    fbSize.width, fbSize.height);
-                iOS_WriteLog("SDL_FORCED_WINDOW", dbg);
+            } else {
+                iOS_WriteLog("SDL_WINDOW_SKIP_FORCE", "SDL window is already valid; skipping forcing helper window");
             }
         }
     }
@@ -800,6 +804,13 @@ static GLuint gScreenFramebuffer = 0;
 extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
 {
     @try {
+        // Try direct SDL creation first
+        SDL_GLContext directCtx = SDL_GL_CreateContext(window);
+        if (directCtx) {
+            iOS_WriteLog("SDL_GL_CREATECONTEXT", "SDL_GL_CreateContext succeeded directly!");
+            iOS_UnswizzleSetPosition();
+            return directCtx;
+        }
         // Ensure swizzle is active
         if (!gSwizzleActive)
             iOS_SwizzleSetPosition();
