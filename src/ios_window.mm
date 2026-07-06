@@ -1,6 +1,8 @@
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
+#import <OpenGLES/ES2/gl.h>
+#import <OpenGLES/ES2/glext.h>
 
 #include "ios_platform.h"
 
@@ -917,8 +919,8 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
                         };
 
                         char lbuf[96];
-                        snprintf(lbuf, sizeof(lbuf), "found view=%@ layer=%.0fx%.0f",
-                            NSStringFromClass([targetView class]),
+                        snprintf(lbuf, sizeof(lbuf), "found view=%s layer=%.0fx%.0f",
+                            object_getClassName(targetView),
                             eaglLayer.bounds.size.width,
                             eaglLayer.bounds.size.height);
                         iOS_WriteLog("SDL_VIEW_SETUP", lbuf);
