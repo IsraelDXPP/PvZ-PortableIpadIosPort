@@ -49,6 +49,7 @@ static BOOL iOS_SizeIsValid(CGSize size)
 }
 
 static CGSize gSanitizeFallbackSize = {0, 0};
+static UIWindow* gForcedUIWindow = nil;
 
 static void iOS_LogSize(char* buf, size_t bufSize, const char* label, CGSize size)
 {
@@ -193,7 +194,10 @@ static UIWindow* iOS_FindActiveWindow(SDL_Window* sdlWindow)
         return win;
 
     NSArray<UIWindow*>* wins = [UIApplication sharedApplication].windows;
-    return wins.count > 0 ? wins[0] : nil;
+    if (wins.count > 0)
+        return wins[0];
+
+    return gForcedUIWindow;
 }
 
 /// Bootstrap a UIWindow with real dimensions from UIScreen.currentMode, then
@@ -638,6 +642,39 @@ extern "C" SDL_Window* iOS_CreateWindowSafe(
 
         if (!result)
             iOS_WriteLog("SDL_CREATE_WINDOW_FAIL", SDL_GetError() ?: "null");
+
+        // CreateWindowFrom failed and SDL_CreateWindow may have created a
+        // 0×0 window if UIScreen.bounds was still {0,0}.  Force a real
+        // UIWindow with the hardcoded screen size so that
+        // iOS_FindActiveWindow / iOS_WaitForWindowLayout have something
+        // to work with, and the EAGL context can be created.
+        if (result) {
+            CGSize fbSize;
+            iOS_MeasureScreenSize(&fbSize);
+            if (iOS_SizeIsValid(fbSize)) {
+                // Landscape: ensure width > height
+                if (fbSize.width < fbSize.height) {
+                    CGFloat t = fbSize.width;
+                    fbSize.width = fbSize.height;
+                    fbSize.height = t;
+                }
+                CGRect fbFrame = CGRectMake(0, 0, fbSize.width, fbSize.height);
+
+                gForcedUIWindow = [[UIWindow alloc] initWithFrame:fbFrame];
+                UIViewController* fbVC = [[UIViewController alloc] init];
+                fbVC.view.frame = fbFrame;
+                gForcedUIWindow.rootViewController = fbVC;
+                [gForcedUIWindow makeKeyAndVisible];
+                [gForcedUIWindow layoutIfNeeded];
+
+                SDL_SetWindowSize(result, (int)fbSize.width, (int)fbSize.height);
+
+                char dbg[128];
+                snprintf(dbg, sizeof(dbg), "forced UIWindow %.0fx%.0f",
+                    fbSize.width, fbSize.height);
+                iOS_WriteLog("SDL_FORCED_WINDOW", dbg);
+            }
+        }
     }
 
     if (result) {
