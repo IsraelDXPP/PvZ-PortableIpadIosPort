@@ -35,6 +35,11 @@ SDL_Window* iOS_CreateWindowSafe(const char* title, int x, int y, int w, int h, 
    Returns an SDL_GLContext (void*) or nullptr on failure. */
 void* iOS_CreateGLContextSafe(struct SDL_Window* window);
 
+/* Custom swap — called from GLInterface::Flush() on iOS instead of
+   SDL_GL_SwapWindow (which uses window->driverdata.context that may not
+   be set when we bypass SDL_GL_CreateContext). */
+void iOS_SwapWindow(struct SDL_Window* window);
+
 /* Top-level @try/@catch wrapper around the game's entry-point function.
    Catches any ObjC NSException that propagates up from the game loop
    before it reaches the C++ SjLj unwinder.  Returns entry(argc, argv)

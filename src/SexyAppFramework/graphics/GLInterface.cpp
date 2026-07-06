@@ -1240,8 +1240,11 @@ bool GLInterface::PreDraw()
 void GLInterface::Flush()
 {
 	gNumVertices = 0;
-#ifdef __SWITCH__
+#if defined(__SWITCH__)
 	eglSwapBuffers(mApp->mWindow, mApp->mSurface);
+#elif defined(__IPHONEOS__)
+	extern void iOS_SwapWindow(struct SDL_Window* window);
+	iOS_SwapWindow((SDL_Window*)mApp->mWindow);
 #else
 	SDL_GL_SwapWindow((SDL_Window*)mApp->mWindow);
 #endif

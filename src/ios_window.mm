@@ -1031,13 +1031,12 @@ extern "C" int iOS_RunGameAfterActivation(int (*runGameFn)(int, char**), int arg
 
 
 // ---------------------------------------------------------------------------
-// SDL function overrides — static linking means our .o symbols take
-// precedence over the SDL2 static library.
+// Custom swap — called from GLInterface::Flush() on iOS instead of
+// SDL_GL_SwapWindow (which would try to use window->driverdata.context
+// that we never set when bypassing SDL_GL_CreateContext).
 // ---------------------------------------------------------------------------
 
-/// Override SDL_GL_SwapWindow to use our custom EAGLContext (stored as the
-/// current context via [EAGLContext setCurrentContext:]).
-extern "C" void SDL_GL_SwapWindow(SDL_Window* window)
+extern "C" void iOS_SwapWindow(SDL_Window* window)
 {
     @autoreleasepool {
         EAGLContext* ctx = [EAGLContext currentContext];
@@ -1045,13 +1044,6 @@ extern "C" void SDL_GL_SwapWindow(SDL_Window* window)
             [ctx presentRenderbuffer:GL_RENDERBUFFER];
         }
     }
-}
-
-/// Override SDL_GL_SetSwapInterval — iOS vsync is handled automatically by
-/// presentRenderbuffer:; no special setup needed.
-extern "C" int SDL_GL_SetSwapInterval(int interval)
-{
-    return 0;
 }
 
 /// Top-level @try/@catch wrapper for the game's entry-point function.
