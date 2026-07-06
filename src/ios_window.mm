@@ -865,32 +865,66 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
         // Spin the run loop so CoreAnimation commits layout before EAGL allocation.
         iOS_PumpRunLoopMs(50);
 
-        // CAEAGLLayer.bounds can stay 0×0 when the parent UIWindow has no
-        // valid screen.  Swizzle it so that renderbufferStorage:fromDrawable:
-        // sees a non-zero size and the EAGL context creation succeeds.
+        // SDL_GetWindowWMInfo always returns false in this SDL port, so
+        // we cannot access the internal SDL_uikitview through the normal
+        // API.  Instead, search the application window hierarchy for a
+        // view whose layer is a CAEAGLLayer — that is the SDL view.
+        // Force its frame and layer bounds to 1024×768, create our own
+        // EAGLContext, and set it up so that SDL_GL_SwapWindow works.
         {
-            static BOOL eaglSwizzled = NO;
-            if (!eaglSwizzled) {
-                Class cls = NSClassFromString(@"CAEAGLLayer");
-                if (cls) {
-                    // The -bounds method is inherited from CALayer; add a
-                    // new implementation directly on CAEAGLLayer so only
-                    // EAGL layers are affected.
-                    Method superM = class_getInstanceMethod([CALayer class], @selector(bounds));
-                    IMP origImpl = method_getImplementation(superM);
-                    const char* types = method_getTypeEncoding(superM);
-                    if (class_addMethod(cls, @selector(bounds), imp_implementationWithBlock(^(id self) {
-                        CGRect r = ((CGRect (*)(id, SEL))origImpl)(self, @selector(bounds));
-                        if (r.size.width <= 0.0f || r.size.height <= 0.0f ||
-                            isnan(r.size.width) || isnan(r.size.height)) {
-                            return CGRectMake(0, 0, 1024, 768);
-                        }
-                        return r;
-                    }), types)) {
-                        iOS_WriteLog("EAGL_SWIZZLE", "CAEAGLLayer.bounds installed");
+            Class viewClass = NSClassFromString(@"SDL_uikitview");
+            if (!viewClass)
+                viewClass = [UIView class];  // fallback
+
+            for (UIWindow* win in [UIApplication sharedApplication].windows) {
+                // Skip our forced fallback window.
+                if (win == gForcedUIWindow) continue;
+
+                // Accept any window whose root view controller matches.
+                UIView* targetView = nil;
+                for (UIView* sv in win.subviews) {
+                    if (viewClass == [UIView class] ||
+                        [sv isKindOfClass:viewClass]) {
+                        targetView = sv;
+                        break;
                     }
                 }
-                eaglSwizzled = YES;
+                if (!targetView && win.rootViewController.view) {
+                    // Try the root VC's view instead.
+                    targetView = win.rootViewController.view;
+                }
+
+                if (targetView) {
+                    CGSize ts;
+                    iOS_MeasureScreenSize(&ts);
+                    if (iOS_SizeIsValid(ts)) {
+                        if (ts.width < ts.height) {
+                            CGFloat tmp = ts.width;
+                            ts.width = ts.height;
+                            ts.height = tmp;
+                        }
+
+                        targetView.frame = CGRectMake(0, 0, ts.width, ts.height);
+                        targetView.layer.bounds = CGRectMake(0, 0, ts.width, ts.height);
+
+                        [targetView setNeedsLayout];
+                        [targetView layoutIfNeeded];
+
+                        CAEAGLLayer* eaglLayer = (CAEAGLLayer*)targetView.layer;
+                        eaglLayer.drawableProperties = @{
+                            kEAGLDrawablePropertyRetainedBacking: @NO,
+                            kEAGLDrawablePropertyColorFormat: kEAGLColorFormatRGBA8
+                        };
+
+                        char lbuf[96];
+                        snprintf(lbuf, sizeof(lbuf), "found view=%@ layer=%.0fx%.0f",
+                            NSStringFromClass([targetView class]),
+                            eaglLayer.bounds.size.width,
+                            eaglLayer.bounds.size.height);
+                        iOS_WriteLog("SDL_VIEW_SETUP", lbuf);
+                        break;
+                    }
+                }
             }
         }
 
@@ -900,9 +934,46 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
             const char* sdlErr = SDL_GetError();
             iOS_WriteLog("SDL_GL_CREATECONTEXT_FAIL",
                 sdlErr ? sdlErr : "SDL_GL_CreateContext returned NULL");
-            // Leave swizzle active — caller retries
-        } else {
-            // Success — remove swizzle
+
+            // Fallback: try to create our own EAGLContext from the SDL
+            // view's layer directly, bypassing SDL's broken creation.
+            Class sdlClass = NSClassFromString(@"SDL_uikitview");
+            if (!sdlClass) sdlClass = [UIView class];
+            for (UIWindow* win in [UIApplication sharedApplication].windows) {
+                if (win == gForcedUIWindow) continue;
+                for (UIView* sv in win.subviews) {
+                    if (![sv isKindOfClass:sdlClass] && sdlClass != [UIView class])
+                        continue;
+                    CAEAGLLayer* el = (CAEAGLLayer*)sv.layer;
+                    if (![el isKindOfClass:[CAEAGLLayer class]])
+                        continue;
+                    el.drawableProperties = @{
+                        kEAGLDrawablePropertyRetainedBacking: @NO,
+                        kEAGLDrawablePropertyColorFormat: kEAGLColorFormatRGBA8
+                    };
+                    EAGLContext* eaglCtx = [[EAGLContext alloc]
+                        initWithAPI:kEAGLRenderingAPIOpenGLES2];
+                    if (eaglCtx) {
+                        [EAGLContext setCurrentContext:eaglCtx];
+                        GLuint rb;
+                        glGenRenderbuffers(1, &rb);
+                        glBindRenderbuffer(GL_RENDERBUFFER, rb);
+                        [eaglCtx renderbufferStorage:GL_RENDERBUFFER
+                                        fromDrawable:el];
+                        // Store context on the view so SDL_GL_SwapWindow
+                        // can find it (via KVC).
+                        [sv setValue:eaglCtx forKey:@"context"];
+                        ctx = (__bridge SDL_GLContext)eaglCtx;
+                        iOS_WriteLog("EAGL_FALLBACK",
+                            "custom EAGLContext created OK");
+                    }
+                    break;
+                }
+                if (ctx) break;
+            }
+        }
+
+        if (ctx) {
             iOS_UnswizzleSetPosition();
         }
 
