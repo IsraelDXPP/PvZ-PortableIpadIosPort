@@ -671,6 +671,16 @@ extern "C" SDL_Window* iOS_CreateWindowSafe(
     if (!result) {
         iOS_WriteLog("SDL_WINDOW_INIT", "CreateWindowFrom failed — SDL_CreateWindow fallback");
         @try {
+            // Override w/h with measured screen size before creating the
+            // SDL window, so the internal UIKit view gets a valid initial
+            // frame and its CAEAGLLayer has non-zero dimensions.
+            {
+                CGSize cz;
+                if (iOS_MeasureScreenSize(&cz) && iOS_SizeIsValid(cz)) {
+                    w = (int)cz.width;
+                    h = (int)cz.height;
+                }
+            }
             result = SDL_CreateWindow(title, x, y, w, h, flags);
         }
         @catch (NSException* ex) {
@@ -855,32 +865,32 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
         // Spin the run loop so CoreAnimation commits layout before EAGL allocation.
         iOS_PumpRunLoopMs(50);
 
-        // UIWindow.bounds can stay 0×0 on iOS 9 iPad even after forced frames,
-        // so we skip the window-bounds check and check the SDL view directly.
-        // The view and its CAEAGLLayer were already forced to valid dimensions.
+        // CAEAGLLayer.bounds can stay 0×0 when the parent UIWindow has no
+        // valid screen.  Swizzle it so that renderbufferStorage:fromDrawable:
+        // sees a non-zero size and the EAGL context creation succeeds.
         {
-            SDL_SysWMinfo winfo2;
-            SDL_VERSION(&winfo2.version);
-            if (SDL_GetWindowWMInfo(window, &winfo2)) {
-#if defined(SDL_SYSWM_UIKIT)
-                UIView* sdlView = winfo2.info.uikit.view;
-                if (sdlView) {
-                    char vbuf[128];
-                    snprintf(vbuf, sizeof(vbuf), "forcing GL — view bounds=%.0fx%.0f layer=%.0fx%.0f",
-                        sdlView.bounds.size.width, sdlView.bounds.size.height,
-                        sdlView.layer.bounds.size.width, sdlView.layer.bounds.size.height);
-                    iOS_WriteLog("SDL_GL_VIEW", vbuf);
-
-                    // One more forced set in case layout reverted us
-                    CGSize fb2;
-                    iOS_MeasureScreenSize(&fb2);
-                    if (iOS_SizeIsValid(fb2)) {
-                        CGRect forced = CGRectMake(0, 0, fb2.width, fb2.height);
-                        sdlView.frame = forced;
-                        sdlView.layer.bounds = forced;
+            static BOOL eaglSwizzled = NO;
+            if (!eaglSwizzled) {
+                Class cls = NSClassFromString(@"CAEAGLLayer");
+                if (cls) {
+                    // The -bounds method is inherited from CALayer; add a
+                    // new implementation directly on CAEAGLLayer so only
+                    // EAGL layers are affected.
+                    Method superM = class_getInstanceMethod([CALayer class], @selector(bounds));
+                    IMP origImpl = method_getImplementation(superM);
+                    const char* types = method_getTypeEncoding(superM);
+                    if (class_addMethod(cls, @selector(bounds), imp_implementationWithBlock(^(id self) {
+                        CGRect r = ((CGRect (*)(id, SEL))origImpl)(self, @selector(bounds));
+                        if (r.size.width <= 0.0f || r.size.height <= 0.0f ||
+                            isnan(r.size.width) || isnan(r.size.height)) {
+                            return CGRectMake(0, 0, 1024, 768);
+                        }
+                        return r;
+                    }), types)) {
+                        iOS_WriteLog("EAGL_SWIZZLE", "CAEAGLLayer.bounds installed");
                     }
                 }
-#endif
+                eaglSwizzled = YES;
             }
         }
 
