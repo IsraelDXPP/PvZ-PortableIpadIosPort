@@ -186,16 +186,18 @@ static UIWindow* iOS_GetSDLUIWindow(SDL_Window* window)
 static UIWindow* iOS_FindActiveWindow(SDL_Window* sdlWindow)
 {
     UIWindow* win = iOS_GetSDLUIWindow(sdlWindow);
-    if (win)
+    if (win && iOS_SizeIsValid(win.bounds.size))
         return win;
 
     win = [UIApplication sharedApplication].keyWindow;
-    if (win)
+    if (win && iOS_SizeIsValid(win.bounds.size))
         return win;
 
     NSArray<UIWindow*>* wins = [UIApplication sharedApplication].windows;
-    if (wins.count > 0)
-        return wins[0];
+    for (UIWindow* w in wins) {
+        if (iOS_SizeIsValid(w.bounds.size))
+            return w;
+    }
 
     return gForcedUIWindow;
 }
@@ -666,6 +668,14 @@ extern "C" SDL_Window* iOS_CreateWindowSafe(
                 gForcedUIWindow.rootViewController = fbVC;
                 [gForcedUIWindow makeKeyAndVisible];
                 [gForcedUIWindow layoutIfNeeded];
+
+                // Also force the SDL window's internal UIWindow frame
+                UIWindow* sdlUIWin = iOS_GetSDLUIWindow(result);
+                if (sdlUIWin && !iOS_SizeIsValid(sdlUIWin.bounds.size)) {
+                    sdlUIWin.frame = fbFrame;
+                    [sdlUIWin makeKeyAndVisible];
+                    [sdlUIWin layoutIfNeeded];
+                }
 
                 SDL_SetWindowSize(result, (int)fbSize.width, (int)fbSize.height);
 
