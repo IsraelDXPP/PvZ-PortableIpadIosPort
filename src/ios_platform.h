@@ -41,6 +41,7 @@ void* iOS_CreateGLContextSafe(struct SDL_Window* window);
    Declared inside Sexy namespace for C++ linkage match. */
 #ifdef __cplusplus
 namespace Sexy {
+unsigned int iOS_GetScreenFramebuffer();
 void iOS_SwapWindow(struct SDL_Window* window);
 }
 #endif

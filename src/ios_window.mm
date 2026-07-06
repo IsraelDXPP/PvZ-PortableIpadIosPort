@@ -993,8 +993,17 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
                     char rbb[64];
                     snprintf(rbb, sizeof(rbb), "rb=%dx%d", rbW, rbH);
                     iOS_WriteLog("GL_RB_SIZE", rbb);
+
+                    GLuint fb = 0;
+                    glGenFramebuffers(1, &fb);
+                    glBindFramebuffer(GL_FRAMEBUFFER, fb);
+                    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, rb);
+
+                    gScreenRenderbuffer = rb;
+                    gScreenFramebuffer = fb;
+
                     ctx = (__bridge SDL_GLContext)eaglCtx;
-                    iOS_WriteLog("EAGL_CUSTOM", "custom EAGLContext created OK");
+                    iOS_WriteLog("EAGL_CUSTOM", "custom EAGLContext created OK with framebuffer");
                 } else {
                     iOS_WriteLog("EAGL_CUSTOM_FAIL", "renderbufferStorage returned NO");
                 }
@@ -1059,12 +1068,23 @@ extern "C" int iOS_RunGameAfterActivation(int (*runGameFn)(int, char**), int arg
 // that we never set when bypassing SDL_GL_CreateContext).
 // ---------------------------------------------------------------------------
 
+static GLuint gScreenRenderbuffer = 0;
+static GLuint gScreenFramebuffer = 0;
+
 namespace Sexy {
+unsigned int iOS_GetScreenFramebuffer()
+{
+    return gScreenFramebuffer;
+}
+
 void iOS_SwapWindow(SDL_Window* window)
 {
     @autoreleasepool {
         EAGLContext* ctx = [EAGLContext currentContext];
         if (ctx) {
+            if (gScreenRenderbuffer) {
+                glBindRenderbuffer(GL_RENDERBUFFER, gScreenRenderbuffer);
+            }
             [ctx presentRenderbuffer:GL_RENDERBUFFER];
         }
     }

@@ -49,6 +49,11 @@
 
 using namespace Sexy;
 
+#ifdef __IPHONEOS__
+#undef glBindFramebuffer
+#define glBindFramebuffer(target, fb) glad_glBindFramebuffer(target, (fb) == 0 ? Sexy::iOS_GetScreenFramebuffer() : (fb))
+#endif
+
 bool gDesktopGLFallback = false;
 
 static inline uint32_t ArgbToRgba(uint32_t argb) noexcept
