@@ -855,11 +855,33 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
         // Spin the run loop so CoreAnimation commits layout before EAGL allocation.
         iOS_PumpRunLoopMs(50);
 
-        kw = iOS_FindActiveWindow(window);
-        if (!kw || !iOS_SizeIsValid(kw.bounds.size)) {
-            iOS_WriteLog("SDL_GL_CREATECONTEXT_FAIL",
-                "window bounds still invalid — waiting for UIKit layout");
-            return nullptr;
+        // UIWindow.bounds can stay 0×0 on iOS 9 iPad even after forced frames,
+        // so we skip the window-bounds check and check the SDL view directly.
+        // The view and its CAEAGLLayer were already forced to valid dimensions.
+        {
+            SDL_SysWMinfo winfo2;
+            SDL_VERSION(&winfo2.version);
+            if (SDL_GetWindowWMInfo(window, &winfo2)) {
+#if defined(SDL_SYSWM_UIKIT)
+                UIView* sdlView = winfo2.info.uikit.view;
+                if (sdlView) {
+                    char vbuf[128];
+                    snprintf(vbuf, sizeof(vbuf), "forcing GL — view bounds=%.0fx%.0f layer=%.0fx%.0f",
+                        sdlView.bounds.size.width, sdlView.bounds.size.height,
+                        sdlView.layer.bounds.size.width, sdlView.layer.bounds.size.height);
+                    iOS_WriteLog("SDL_GL_VIEW", vbuf);
+
+                    // One more forced set in case layout reverted us
+                    CGSize fb2;
+                    iOS_MeasureScreenSize(&fb2);
+                    if (iOS_SizeIsValid(fb2)) {
+                        CGRect forced = CGRectMake(0, 0, fb2.width, fb2.height);
+                        sdlView.frame = forced;
+                        sdlView.layer.bounds = forced;
+                    }
+                }
+#endif
+            }
         }
 
         SDL_GLContext ctx = SDL_GL_CreateContext(window);
