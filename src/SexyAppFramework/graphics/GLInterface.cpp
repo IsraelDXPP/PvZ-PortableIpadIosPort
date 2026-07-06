@@ -37,6 +37,10 @@
 #include <mutex>
 #include <vector>
 
+#ifdef __IPHONEOS__
+#include "ios_platform.h"
+#endif
+
 #define MAX_VERTICES 16384
 
 #ifndef GL_FRAMEBUFFER_SRGB
@@ -1243,8 +1247,7 @@ void GLInterface::Flush()
 #if defined(__SWITCH__)
 	eglSwapBuffers(mApp->mWindow, mApp->mSurface);
 #elif defined(__IPHONEOS__)
-	extern void iOS_SwapWindow(struct SDL_Window* window);
-	iOS_SwapWindow((SDL_Window*)mApp->mWindow);
+	Sexy::iOS_SwapWindow((SDL_Window*)mApp->mWindow);
 #else
 	SDL_GL_SwapWindow((SDL_Window*)mApp->mWindow);
 #endif
