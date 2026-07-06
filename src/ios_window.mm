@@ -126,19 +126,21 @@ static BOOL iOS_MeasureScreenSize(CGSize* outSize)
         }
     }
 
-    // Last resort: hardcoded fallback based on device idiom.
+    // Last resort: hardcoded fallback.
     // UIKit sometimes keeps UIScreen.bounds at {0,0} on iOS 9 iPad
     // even after applicationDidBecomeActive — every UIKit query above
     // fails and we still have no size.
-    BOOL isPad = [UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPad;
-    if (isPad) {
-        *outSize = CGSizeMake(1024, 768);     // All iPads up to Air 2 / Mini 4
-    } else {
-        *outSize = CGSizeMake(320, 480);      // iPhone 4S/5/5S fallback
-    }
+    // If we reached here, all UIKit methods returned zero — this is
+    // the iOS-9-iPad-bounds-never-settle bug.  On iPhones UIKit always
+    // reports valid bounds, so a hardcoded 1024×768 (iPad landscape
+    // points) is the correct universal fallback.
+    //
+    // Note: [UIDevice currentDevice].userInterfaceIdiom can return
+    // UIUserInterfaceIdiomPhone even on a real iPad (Mini 1, iOS 9.3.6)
+    // when called during early launch, so we don't branch on it.
+    *outSize = CGSizeMake(1024, 768);
     gSanitizeFallbackSize = *outSize;
-    iOS_WriteLog("SCREEN_FALLBACK",
-        isPad ? "1024x768 (iPad hardcoded)" : "320x480 (iPhone hardcoded)");
+    iOS_WriteLog("SCREEN_FALLBACK", "1024x768 (hardcoded)");
     return YES;
 }
 
