@@ -791,6 +791,12 @@ static UIView* iOS_FindEAGLViewRecursive(UIView* view)
 ///   6. Set the context as current; return it as an SDL_GLContext.
 ///
 /// Returns the context, or nullptr on failure.
+// Screen framebuffer and renderbuffer created by our custom EAGLContext path.
+// Defined here (file scope) so they are accessible to both
+// iOS_CreateGLContextSafe (which creates them) and iOS_SwapWindow / iOS_GetScreenFramebuffer.
+static GLuint gScreenRenderbuffer = 0;
+static GLuint gScreenFramebuffer = 0;
+
 extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
 {
     @try {
@@ -1067,9 +1073,6 @@ extern "C" int iOS_RunGameAfterActivation(int (*runGameFn)(int, char**), int arg
 // SDL_GL_SwapWindow (which would try to use window->driverdata.context
 // that we never set when bypassing SDL_GL_CreateContext).
 // ---------------------------------------------------------------------------
-
-static GLuint gScreenRenderbuffer = 0;
-static GLuint gScreenFramebuffer = 0;
 
 namespace Sexy {
 unsigned int iOS_GetScreenFramebuffer()
