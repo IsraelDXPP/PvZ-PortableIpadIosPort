@@ -8,6 +8,7 @@
 
     <application
         android:allowBackup="true"
+        android:extractNativeLibs="false"
         android:appCategory="game"
         android:isGame="true"
         android:icon="@mipmap/ic_launcher"
