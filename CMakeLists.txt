@@ -345,6 +345,7 @@ elseif (IOS)
 	)
 
 	if(IOS_IPADMINI1)
+		target_compile_definitions(pvz-portable PRIVATE _LIBCPP_DISABLE_AVAILABILITY)
 		target_link_options(pvz-portable PRIVATE "-F${CMAKE_CURRENT_SOURCE_DIR}/dummy_frameworks" "-lobjc" "-Wl,-undefined,dynamic_lookup")
 		target_sources(pvz-portable PRIVATE 
 			"${CMAKE_CURRENT_SOURCE_DIR}/src/ios_polyfills.c"
