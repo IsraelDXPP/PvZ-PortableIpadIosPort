@@ -1165,6 +1165,10 @@ int GLInterface::Init(bool IsWindowed)
 		inited = true;
 		PlatformGLInit();
 
+#ifdef __IPHONEOS__
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+#endif
+
 		gProgram = shaderLoad(SHADER_CODE);
 		if (gProgram == 0)
 			return 0;
@@ -1242,6 +1246,9 @@ void GLInterface::SetCursorPos(int x, int y)
 
 bool GLInterface::PreDraw()
 {
+#ifdef __IPHONEOS__
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+#endif
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	return true;
 }
@@ -1257,6 +1264,9 @@ void GLInterface::Flush()
 	SDL_GL_SwapWindow((SDL_Window*)mApp->mWindow);
 #endif
 #ifndef __EMSCRIPTEN__
+#ifdef __IPHONEOS__
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+#endif
 	// Clear back buffer after swap (content undefined)
 	glClear(GL_COLOR_BUFFER_BIT);
 #endif // Emscripten: browser composites after rAF, no clear needed

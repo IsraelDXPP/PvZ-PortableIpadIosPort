@@ -2,14 +2,7 @@
   "dependencies": [
     "libjpeg-turbo",
     "libogg",
-    {
-      "name": "libopenmpt",
-      "platform": "!(arm & ios)"
-    },
-    {
-      "name": "libmodplug",
-      "platform": "arm & ios"
-    },
+    "libopenmpt",
     "libpng",
     "libvorbis",
     "mpg123",
