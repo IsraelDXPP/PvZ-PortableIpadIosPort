@@ -44,10 +44,35 @@ static void iOS_WriteLog(const char* tag, const char* message)
 // iPad / UIKit layout helpers
 // ---------------------------------------------------------------------------
 
+#if defined(__arm__)
+static const CGFloat kIOSDefaultWidth  = 1024.0f;
+static const CGFloat kIOSDefaultHeight = 768.0f;
+#else
+static const CGFloat kIOSDefaultWidth  = 1024.0f;
+static const CGFloat kIOSDefaultHeight = 768.0f;
+#endif
+
 static BOOL iOS_SizeIsValid(CGSize size)
 {
-    return size.width > 0.0f && size.height > 0.0f &&
-           !std::isnan(size.width) && !std::isnan(size.height);
+    // Reject denormals / garbage UIKit values that pass "> 0" but round to 0.
+    return (int)size.width >= 64 && (int)size.height >= 64 &&
+           !std::isnan(size.width) && !std::isnan(size.height) &&
+           !std::isinf(size.width) && !std::isinf(size.height);
+}
+
+static void iOS_EnsureLandscape(CGSize* size)
+{
+    if (size->width < size->height) {
+        const CGFloat t = size->width;
+        size->width = size->height;
+        size->height = t;
+    }
+}
+
+/// Guaranteed non-zero landscape size for this port (iPad Mini 1 / armv7).
+static CGSize iOS_GetDefaultScreenSize(void)
+{
+    return CGSizeMake(kIOSDefaultWidth, kIOSDefaultHeight);
 }
 
 static CGSize gSanitizeFallbackSize = {0, 0};
@@ -133,18 +158,22 @@ static BOOL iOS_MeasureScreenSize(CGSize* outSize)
     // UIKit sometimes keeps UIScreen.bounds at {0,0} on iOS 9 iPad
     // even after applicationDidBecomeActive — every UIKit query above
     // fails and we still have no size.
-    // If we reached here, all UIKit methods returned zero — this is
-    // the iOS-9-iPad-bounds-never-settle bug.  On iPhones UIKit always
-    // reports valid bounds, so a hardcoded 1024×768 (iPad landscape
-    // points) is the correct universal fallback.
-    //
-    // Note: [UIDevice currentDevice].userInterfaceIdiom can return
-    // UIUserInterfaceIdiomPhone even on a real iPad (Mini 1, iOS 9.3.6)
-    // when called during early launch, so we don't branch on it.
-    *outSize = CGSizeMake(1024, 768);
+    *outSize = iOS_GetDefaultScreenSize();
     gSanitizeFallbackSize = *outSize;
     iOS_WriteLog("SCREEN_FALLBACK", "1024x768 (hardcoded)");
     return YES;
+}
+
+/// Prefer UIKit when it reports a sane size; otherwise use 1024x768.
+static CGSize iOS_GetReliableScreenSize(void)
+{
+    CGSize size = iOS_GetDefaultScreenSize();
+    if (iOS_MeasureScreenSize(&size) && iOS_SizeIsValid(size))
+        iOS_EnsureLandscape(&size);
+    else
+        size = iOS_GetDefaultScreenSize();
+    gSanitizeFallbackSize = size;
+    return size;
 }
 
 /// Block until UIApplicationStateActive (or timeout).
@@ -221,17 +250,11 @@ static SDL_Window* iOS_TryCreateWindowFromUIKit(void)
     for (int i = 0; i < 100 && !iOS_MeasureScreenSize(&size); i++)
         iOS_PumpRunLoopMs(50);
 
-    if (!iOS_SizeIsValid(size)) {
-        iOS_WriteLog("CREATEFROM_FAIL", "no screen size from UIKit");
-        return nullptr;
-    }
+    if (!iOS_SizeIsValid(size))
+        size = iOS_GetReliableScreenSize();
 
     // Landscape game — prefer the larger axis as width.
-    if (size.width < size.height) {
-        const CGFloat t = size.width;
-        size.width = size.height;
-        size.height = t;
-    }
+    iOS_EnsureLandscape(&size);
 
     const CGRect frame = CGRectMake(0, 0, size.width, size.height);
     UIWindow* uiWindow = [[UIWindow alloc] initWithFrame:frame];
