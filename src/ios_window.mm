@@ -795,6 +795,15 @@ static UIView* iOS_FindEAGLViewRecursive(UIView* view)
 ///   6. Set the context as current; return it as an SDL_GLContext.
 ///
 /// Returns the context, or nullptr on failure.
+@interface PvZEAGLView : UIView
+@end
+
+@implementation PvZEAGLView
++ (Class)layerClass {
+    return [CAEAGLLayer class];
+}
+@end
+
 // Screen framebuffer and renderbuffer created by our custom EAGLContext path.
 // Defined here (file scope) so they are accessible to both
 // iOS_CreateGLContextSafe (which creates them) and iOS_SwapWindow / iOS_GetScreenFramebuffer.
@@ -909,59 +918,45 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
         // and disable Auto Layout so our explicit frame is respected.
         // ------------------------------------------------------------------
         if (!eaglView) {
-            static Class sEAGLViewClass = nil;
-            if (!sEAGLViewClass) {
-                sEAGLViewClass = objc_allocateClassPair([UIView class], "PvZEAGLView", 0);
-                if (sEAGLViewClass) {
-                    IMP layerClassImp = imp_implementationWithBlock(^Class{
-                        return [CAEAGLLayer class];
-                    });
-                    Method layerMethod = class_getClassMethod([UIView class], @selector(layerClass));
-                    const char* typeEnc = method_getTypeEncoding(layerMethod);
-                    class_addMethod(object_getClass(sEAGLViewClass),
-                                    @selector(layerClass), layerClassImp, typeEnc);
-                    objc_registerClassPair(sEAGLViewClass);
-                }
+            // Create a fresh UIWindow directly from UIScreen so it gets
+            // valid bounds on iOS 9 iPad Mini 1 (A5 chip, 32-bit).
+            UIScreen* mainScreen = [UIScreen mainScreen];
+            CGRect screenBounds = mainScreen.bounds;
+            // Ensure landscape
+            if (screenBounds.size.width < screenBounds.size.height) {
+                CGFloat tmp = screenBounds.size.width;
+                screenBounds.size.width = screenBounds.size.height;
+                screenBounds.size.height = tmp;
             }
+            if (!iOS_SizeIsValid(screenBounds.size))
+                screenBounds = CGRectMake(0, 0, fb.width, fb.height);
 
-            if (sEAGLViewClass) {
-                // Create a fresh UIWindow directly from UIScreen so it gets
-                // valid bounds on iOS 9 iPad Mini 1 (A5 chip, 32-bit).
-                UIScreen* mainScreen = [UIScreen mainScreen];
-                CGRect screenBounds = mainScreen.bounds;
-                // Ensure landscape
-                if (screenBounds.size.width < screenBounds.size.height) {
-                    CGFloat tmp = screenBounds.size.width;
-                    screenBounds.size.width = screenBounds.size.height;
-                    screenBounds.size.height = tmp;
-                }
-                if (!iOS_SizeIsValid(screenBounds.size))
-                    screenBounds = CGRectMake(0, 0, fb.width, fb.height);
+            UIWindow* eaglWindow = [[UIWindow alloc] initWithFrame:screenBounds];
+            UIViewController* eaglVC = [[UIViewController alloc] init];
+            eaglVC.view.frame = screenBounds;
+            eaglVC.view.backgroundColor = [UIColor blackColor];
+            eaglWindow.rootViewController = eaglVC;
+            [eaglWindow makeKeyAndVisible];
+            iOS_PumpRunLoopMs(50);
 
-                UIWindow* eaglWindow = [[UIWindow alloc] initWithFrame:screenBounds];
-                UIViewController* eaglVC = [[UIViewController alloc] init];
-                eaglVC.view.frame = screenBounds;
-                eaglVC.view.backgroundColor = [UIColor blackColor];
-                eaglWindow.rootViewController = eaglVC;
-                [eaglWindow makeKeyAndVisible];
-                iOS_PumpRunLoopMs(50);
+            // Keep reference to avoid immediate deallocation under ARC
+            gForcedUIWindow = eaglWindow;
 
-                eaglView = [[sEAGLViewClass alloc] initWithFrame:screenBounds];
-                // Disable Auto Layout so our frame is not overridden
-                eaglView.translatesAutoresizingMaskIntoConstraints = YES;
-                eaglView.autoresizingMask = UIViewAutoresizingNone;
-                [eaglVC.view addSubview:eaglView];
-                [eaglVC.view bringSubviewToFront:eaglView];
-                // Let UIKit commit layout
-                [eaglVC.view setNeedsLayout];
-                [eaglVC.view layoutIfNeeded];
+            eaglView = [[PvZEAGLView alloc] initWithFrame:screenBounds];
+            // Disable Auto Layout so our frame is not overridden
+            eaglView.translatesAutoresizingMaskIntoConstraints = YES;
+            eaglView.autoresizingMask = UIViewAutoresizingNone;
+            [eaglVC.view addSubview:eaglView];
+            [eaglVC.view bringSubviewToFront:eaglView];
+            // Let UIKit commit layout
+            [eaglVC.view setNeedsLayout];
+            [eaglVC.view layoutIfNeeded];
 
-                char lbuf[128];
-                snprintf(lbuf, sizeof(lbuf), "runtime CAEAGLLayer view win=%.0fx%.0f view=%.0fx%.0f",
-                    (double)screenBounds.size.width, (double)screenBounds.size.height,
-                    (double)eaglView.frame.size.width, (double)eaglView.frame.size.height);
-                iOS_WriteLog("EAGL_VIEW_CREATED", lbuf);
-            }
+            char lbuf[128];
+            snprintf(lbuf, sizeof(lbuf), "runtime CAEAGLLayer view win=%.0fx%.0f view=%.0fx%.0f",
+                (double)screenBounds.size.width, (double)screenBounds.size.height,
+                (double)eaglView.frame.size.width, (double)eaglView.frame.size.height);
+            iOS_WriteLog("EAGL_VIEW_CREATED", lbuf);
         }
 
         // ------------------------------------------------------------------
