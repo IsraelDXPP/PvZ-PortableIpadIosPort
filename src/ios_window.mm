@@ -115,11 +115,16 @@ static void iOS_ForceViewFrame(UIView* view, CGRect frame)
     if (!view)
         return;
 
-    view.translatesAutoresizingMaskIntoConstraints = YES;
-    view.frame = frame;
-    view.bounds = CGRectMake(0, 0, frame.size.width, frame.size.height);
-    [view setNeedsLayout];
-    [view layoutIfNeeded];
+    @try {
+        view.translatesAutoresizingMaskIntoConstraints = YES;
+        view.frame = frame;
+        view.bounds = CGRectMake(0, 0, frame.size.width, frame.size.height);
+        [view setNeedsLayout];
+        [view layoutIfNeeded];
+    } @catch (NSException* ex) {
+        const char* reason = ex.reason.UTF8String ? ex.reason.UTF8String : "unknown";
+        iOS_WriteLog("FORCE_VIEW_EXCEPTION", reason);
+    }
 }
 
 static void iOS_ForceWindowGeometry(UIWindow* window, CGRect frame)
@@ -127,14 +132,19 @@ static void iOS_ForceWindowGeometry(UIWindow* window, CGRect frame)
     if (!window)
         return;
 
-    window.frame = frame;
-    window.bounds = CGRectMake(0, 0, frame.size.width, frame.size.height);
-    [window makeKeyAndVisible];
-    [window layoutIfNeeded];
+    @try {
+        window.frame = frame;
+        window.bounds = CGRectMake(0, 0, frame.size.width, frame.size.height);
+        [window makeKeyAndVisible];
+        [window layoutIfNeeded];
 
-    UIViewController* vc = window.rootViewController;
-    if (vc && vc.view)
-        iOS_ForceViewFrame(vc.view, window.bounds);
+        UIViewController* vc = window.rootViewController;
+        if (vc && vc.view)
+            iOS_ForceViewFrame(vc.view, window.bounds);
+    } @catch (NSException* ex) {
+        const char* reason = ex.reason.UTF8String ? ex.reason.UTF8String : "unknown";
+        iOS_WriteLog("FORCE_WINDOW_EXCEPTION", reason);
+    }
 }
 
 static void iOS_HideBrokenSDLWindows(UIWindow* keepVisible)
@@ -1267,21 +1277,21 @@ void iOS_SwapWindow(SDL_Window* window)
 {
     (void)window;
     @autoreleasepool {
-        if (gEAGLWindow)
-            iOS_ForceWindowGeometry(gEAGLWindow, iOS_GetDefaultFrame());
-        if (gEAGLView)
-            iOS_ForceViewFrame(gEAGLView, iOS_GetDefaultFrame());
+        @try {
+            EAGLContext* ctx = gEAGLContext ?: [EAGLContext currentContext];
+            if (!ctx)
+                return;
 
-        EAGLContext* ctx = gEAGLContext ?: [EAGLContext currentContext];
-        if (!ctx)
-            return;
-
-        [EAGLContext setCurrentContext:ctx];
-        if (gScreenFramebuffer)
-            glBindFramebuffer(GL_FRAMEBUFFER, gScreenFramebuffer);
-        if (gScreenRenderbuffer)
-            glBindRenderbuffer(GL_RENDERBUFFER, gScreenRenderbuffer);
-        [ctx presentRenderbuffer:GL_RENDERBUFFER];
+            [EAGLContext setCurrentContext:ctx];
+            if (gScreenFramebuffer)
+                glBindFramebuffer(GL_FRAMEBUFFER, gScreenFramebuffer);
+            if (gScreenRenderbuffer)
+                glBindRenderbuffer(GL_RENDERBUFFER, gScreenRenderbuffer);
+            [ctx presentRenderbuffer:GL_RENDERBUFFER];
+        } @catch (NSException* ex) {
+            const char* reason = ex.reason.UTF8String ? ex.reason.UTF8String : "unknown";
+            iOS_WriteLog("SWAP_EXCEPTION", reason);
+        }
     }
 }
 }
