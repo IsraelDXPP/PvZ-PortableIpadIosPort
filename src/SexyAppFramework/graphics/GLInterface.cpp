@@ -1135,8 +1135,13 @@ void GLInterface::UpdateViewport()
 #ifdef __SWITCH__
 	int width = 1280, height = 720;
 #else
-	int width, height;
+	int width = 0, height = 0;
+#ifdef __IPHONEOS__
+	if (!iOS_GetDrawableSize((SDL_Window*)mApp->mWindow, &width, &height))
+		SDL_GL_GetDrawableSize((SDL_Window*)mApp->mWindow, &width, &height);
+#else
 	SDL_GL_GetDrawableSize((SDL_Window*)mApp->mWindow, &width, &height);
+#endif
 #endif
 
 	vw = width; vh = height;

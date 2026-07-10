@@ -75,8 +75,19 @@ static CGSize iOS_GetDefaultScreenSize(void)
     return CGSizeMake(kIOSDefaultWidth, kIOSDefaultHeight);
 }
 
+static CGRect iOS_GetDefaultFrame(void)
+{
+    const CGSize size = iOS_GetDefaultScreenSize();
+    return CGRectMake(0, 0, size.width, size.height);
+}
+
 static CGSize gSanitizeFallbackSize = {0, 0};
 static UIWindow* gForcedUIWindow = nil;
+static UIWindow* gEAGLWindow = nil;
+static UIView* gEAGLView = nil;
+static EAGLContext* gEAGLContext = nil;
+static GLuint gScreenRenderbuffer = 0;
+static GLuint gScreenFramebuffer = 0;
 
 static void iOS_LogSize(char* buf, size_t bufSize, const char* label, CGSize size)
 {
@@ -96,6 +107,43 @@ static void iOS_PumpRunLoopMs(int ms)
                                  beforeDate:[NSDate dateWithTimeIntervalSinceNow:stepMs / 1000.0]];
         SDL_PumpEvents();
         waited += stepMs;
+    }
+}
+
+static void iOS_ForceViewFrame(UIView* view, CGRect frame)
+{
+    if (!view)
+        return;
+
+    view.translatesAutoresizingMaskIntoConstraints = YES;
+    view.frame = frame;
+    view.bounds = CGRectMake(0, 0, frame.size.width, frame.size.height);
+    [view setNeedsLayout];
+    [view layoutIfNeeded];
+}
+
+static void iOS_ForceWindowGeometry(UIWindow* window, CGRect frame)
+{
+    if (!window)
+        return;
+
+    window.frame = frame;
+    window.bounds = CGRectMake(0, 0, frame.size.width, frame.size.height);
+    [window makeKeyAndVisible];
+    [window layoutIfNeeded];
+
+    UIViewController* vc = window.rootViewController;
+    if (vc && vc.view)
+        iOS_ForceViewFrame(vc.view, window.bounds);
+}
+
+static void iOS_HideBrokenSDLWindows(UIWindow* keepVisible)
+{
+    for (UIWindow* win in [UIApplication sharedApplication].windows) {
+        if (win == keepVisible)
+            continue;
+        if (!iOS_SizeIsValid(win.bounds.size) || !iOS_SizeIsValid(win.frame.size))
+            win.hidden = YES;
     }
 }
 
@@ -265,10 +313,8 @@ static SDL_Window* iOS_TryCreateWindowFromUIKit(void)
 
     UIViewController* vc = [[UIViewController alloc] init];
     vc.view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    vc.view.frame = frame;
     uiWindow.rootViewController = vc;
-    [uiWindow makeKeyAndVisible];
-    [uiWindow layoutIfNeeded];
+    iOS_ForceWindowGeometry(uiWindow, frame);
 
     char dbg[160];
     char szBuf[48];
@@ -500,6 +546,39 @@ extern "C" bool iOS_WaitForValidScreenBounds(int* outW, int* outH, int maxWaitMs
     return false;
 }
 
+extern "C" bool iOS_GetDrawableSize(SDL_Window* window, int* outW, int* outH)
+{
+    int w = 0;
+    int h = 0;
+
+    if (window)
+        SDL_GL_GetDrawableSize(window, &w, &h);
+
+    if (w >= 64 && h >= 64) {
+        if (outW) *outW = w;
+        if (outH) *outH = h;
+        return true;
+    }
+
+    if (gScreenRenderbuffer) {
+        GLint rbW = 0;
+        GLint rbH = 0;
+        glBindRenderbuffer(GL_RENDERBUFFER, gScreenRenderbuffer);
+        glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_WIDTH, &rbW);
+        glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_HEIGHT, &rbH);
+        if (rbW >= 64 && rbH >= 64) {
+            if (outW) *outW = (int)rbW;
+            if (outH) *outH = (int)rbH;
+            return true;
+        }
+    }
+
+    const CGSize fb = iOS_GetReliableScreenSize();
+    if (outW) *outW = (int)fb.width;
+    if (outH) *outH = (int)fb.height;
+    return iOS_SizeIsValid(fb);
+}
+
 /// Safe wrapper around SDL_CreateWindow for iOS.
 ///
 /// Phases:
@@ -552,6 +631,8 @@ static void (*gOrigLayerSetFrame)(id, SEL, CGRect);
 static void (*gOrigLayerSetBounds)(id, SEL, CGRect);
 static void (*gOrigViewSetFrame)(id, SEL, CGRect);
 static void (*gOrigViewSetBounds)(id, SEL, CGRect);
+static CGRect (*gOrigViewGetFrame)(id, SEL);
+static CGRect (*gOrigViewGetBounds)(id, SEL);
 
 static void iOS_SwizzledSetPosition(id self, SEL _cmd, CGPoint position)
 {
@@ -581,6 +662,25 @@ static void iOS_SwizzledViewSetBounds(id self, SEL _cmd, CGRect bounds)
 {
     iOS_FixNaNRect(&bounds);
     gOrigViewSetBounds(self, _cmd, bounds);
+}
+
+static CGRect iOS_SwizzledViewGetFrame(id self, SEL _cmd)
+{
+    CGRect orig = gOrigViewGetFrame(self, _cmd);
+    if ([self isKindOfClass:[UIWindow class]] && !iOS_SizeIsValid(orig.size)) {
+        const CGRect fb = iOS_GetDefaultFrame();
+        return CGRectMake(orig.origin.x, orig.origin.y, fb.size.width, fb.size.height);
+    }
+    return orig;
+}
+
+static CGRect iOS_SwizzledViewGetBounds(id self, SEL _cmd)
+{
+    CGRect orig = gOrigViewGetBounds(self, _cmd);
+    if ([self isKindOfClass:[UIWindow class]] && !iOS_SizeIsValid(orig.size)) {
+        return iOS_GetDefaultFrame();
+    }
+    return orig;
 }
 
 static BOOL gSwizzleActive = NO;
@@ -646,6 +746,14 @@ static void iOS_SwizzleSetPosition(void)
     m = class_getInstanceMethod([UIView class], @selector(setBounds:));
     gOrigViewSetBounds = (void (*)(id, SEL, CGRect))method_getImplementation(m);
     method_setImplementation(m, (IMP)iOS_SwizzledViewSetBounds);
+
+    m = class_getInstanceMethod([UIView class], @selector(frame));
+    gOrigViewGetFrame = (CGRect (*)(id, SEL))method_getImplementation(m);
+    method_setImplementation(m, (IMP)iOS_SwizzledViewGetFrame);
+
+    m = class_getInstanceMethod([UIView class], @selector(bounds));
+    gOrigViewGetBounds = (CGRect (*)(id, SEL))method_getImplementation(m);
+    method_setImplementation(m, (IMP)iOS_SwizzledViewGetBounds);
 }
 
 static void iOS_UnswizzleSetPosition(void)
@@ -668,11 +776,19 @@ static void iOS_UnswizzleSetPosition(void)
     m = class_getInstanceMethod([UIView class], @selector(setBounds:));
     method_setImplementation(m, (IMP)gOrigViewSetBounds);
 
+    m = class_getInstanceMethod([UIView class], @selector(frame));
+    method_setImplementation(m, (IMP)gOrigViewGetFrame);
+
+    m = class_getInstanceMethod([UIView class], @selector(bounds));
+    method_setImplementation(m, (IMP)gOrigViewGetBounds);
+
     gOrigSetPosition = nil;
     gOrigLayerSetFrame = nil;
     gOrigLayerSetBounds = nil;
     gOrigViewSetFrame = nil;
     gOrigViewSetBounds = nil;
+    gOrigViewGetFrame = nil;
+    gOrigViewGetBounds = nil;
 }
 
 extern "C" SDL_Window* iOS_CreateWindowSafe(
@@ -739,17 +855,12 @@ extern "C" SDL_Window* iOS_CreateWindowSafe(
 
                     gForcedUIWindow = [[UIWindow alloc] initWithFrame:fbFrame];
                     UIViewController* fbVC = [[UIViewController alloc] init];
-                    fbVC.view.frame = fbFrame;
                     gForcedUIWindow.rootViewController = fbVC;
-                    [gForcedUIWindow makeKeyAndVisible];
-                    [gForcedUIWindow layoutIfNeeded];
+                    iOS_ForceWindowGeometry(gForcedUIWindow, fbFrame);
 
                     // Also force the SDL window's internal UIWindow frame
-                    if (sdlUIWin) {
-                        sdlUIWin.frame = fbFrame;
-                        [sdlUIWin makeKeyAndVisible];
-                        [sdlUIWin layoutIfNeeded];
-                    }
+                    if (sdlUIWin)
+                        iOS_ForceWindowGeometry(sdlUIWin, fbFrame);
 
                     SDL_SetWindowSize(result, (int)fbSize.width, (int)fbSize.height);
 
@@ -830,8 +941,6 @@ static UIView* iOS_FindEAGLViewRecursive(UIView* view)
 // Screen framebuffer and renderbuffer created by our custom EAGLContext path.
 // Defined here (file scope) so they are accessible to both
 // iOS_CreateGLContextSafe (which creates them) and iOS_SwapWindow / iOS_GetScreenFramebuffer.
-static GLuint gScreenRenderbuffer = 0;
-static GLuint gScreenFramebuffer = 0;
 
 extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
 {
@@ -941,46 +1050,35 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
         // and disable Auto Layout so our explicit frame is respected.
         // ------------------------------------------------------------------
         if (!eaglView) {
-            // Create a fresh UIWindow directly from UIScreen so it gets
-            // valid bounds on iOS 9 iPad Mini 1 (A5 chip, 32-bit).
-            UIScreen* mainScreen = [UIScreen mainScreen];
-            CGRect screenBounds = mainScreen.bounds;
-            // Ensure landscape
-            if (screenBounds.size.width < screenBounds.size.height) {
-                CGFloat tmp = screenBounds.size.width;
-                screenBounds.size.width = screenBounds.size.height;
-                screenBounds.size.height = tmp;
-            }
-            if (!iOS_SizeIsValid(screenBounds.size))
-                screenBounds = CGRectMake(0, 0, fb.width, fb.height);
+            const CGRect screenBounds = iOS_GetDefaultFrame();
 
             UIWindow* eaglWindow = [[UIWindow alloc] initWithFrame:screenBounds];
             UIViewController* eaglVC = [[UIViewController alloc] init];
-            eaglVC.view.frame = screenBounds;
             eaglVC.view.backgroundColor = [UIColor blackColor];
             eaglWindow.rootViewController = eaglVC;
-            [eaglWindow makeKeyAndVisible];
+            iOS_ForceWindowGeometry(eaglWindow, screenBounds);
             iOS_PumpRunLoopMs(50);
 
-            // Keep reference to avoid immediate deallocation under ARC
             gForcedUIWindow = eaglWindow;
+            gEAGLWindow = eaglWindow;
 
-            eaglView = [[PvZEAGLView alloc] initWithFrame:screenBounds];
-            // Disable Auto Layout so our frame is not overridden
-            eaglView.translatesAutoresizingMaskIntoConstraints = YES;
-            eaglView.autoresizingMask = UIViewAutoresizingNone;
+            eaglView = [[PvZEAGLView alloc] initWithFrame:eaglVC.view.bounds];
+            eaglView.autoresizingMask =
+                UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+            eaglView.backgroundColor = [UIColor blackColor];
             [eaglVC.view addSubview:eaglView];
             [eaglVC.view bringSubviewToFront:eaglView];
-            // Let UIKit commit layout
-            [eaglVC.view setNeedsLayout];
-            [eaglVC.view layoutIfNeeded];
+            iOS_ForceViewFrame(eaglView, eaglVC.view.bounds);
+            iOS_HideBrokenSDLWindows(eaglWindow);
 
             char lbuf[128];
             snprintf(lbuf, sizeof(lbuf), "runtime CAEAGLLayer view win=%.0fx%.0f view=%.0fx%.0f",
-                (double)screenBounds.size.width, (double)screenBounds.size.height,
+                (double)eaglVC.view.bounds.size.width, (double)eaglVC.view.bounds.size.height,
                 (double)eaglView.frame.size.width, (double)eaglView.frame.size.height);
             iOS_WriteLog("EAGL_VIEW_CREATED", lbuf);
         }
+
+        gEAGLView = eaglView;
 
         // ------------------------------------------------------------------
         // Step 4: Force the found/created view's frame and layer bounds,
@@ -988,12 +1086,9 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
         // ------------------------------------------------------------------
         CAEAGLLayer* eaglLayer = nil;
         if (eaglView) {
-            // Disable autoresizing so parent layout can't stomp our frame
-            eaglView.translatesAutoresizingMaskIntoConstraints = YES;
-            eaglView.autoresizingMask = UIViewAutoresizingNone;
-
-            // Set both frame (position+size in parent coords) and layer bounds
-            eaglView.frame = fbFrame;
+            eaglView.autoresizingMask =
+                UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+            iOS_ForceViewFrame(eaglView, fbFrame);
 
             // Force CATransaction to commit the frame immediately
             [CATransaction begin];
@@ -1048,7 +1143,9 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
         // CAEAGLLayer with non-zero bounds, SDL might succeed now.
         // ------------------------------------------------------------------
         SDL_GLContext ctx = nullptr;
-        if (eaglLayer && iOS_SizeIsValid(eaglLayer.bounds.size)) {
+        const bool layerReady = eaglLayer &&
+            (iOS_SizeIsValid(eaglLayer.bounds.size) || iOS_SizeIsValid(fb));
+        if (layerReady) {
             char lb[64];
             iOS_LogSize(lb, sizeof(lb), "layerBnd_final", eaglLayer.bounds.size);
             iOS_WriteLog("LAYER_FINAL", lb);
@@ -1067,6 +1164,7 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
         if (!ctx && eaglLayer) {
             EAGLContext* eaglCtx = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES2];
             if (eaglCtx) {
+                gEAGLContext = eaglCtx;
                 [EAGLContext setCurrentContext:eaglCtx];
                 GLuint rb;
                 glGenRenderbuffers(1, &rb);
@@ -1086,6 +1184,12 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
 
                     gScreenRenderbuffer = rb;
                     gScreenFramebuffer = fb;
+
+                    if (gEAGLWindow)
+                        iOS_ForceWindowGeometry(gEAGLWindow, fbFrame);
+                    if (gEAGLView)
+                        iOS_ForceViewFrame(gEAGLView, fbFrame);
+                    iOS_HideBrokenSDLWindows(gEAGLWindow);
 
                     ctx = (__bridge SDL_GLContext)eaglCtx;
                     iOS_WriteLog("EAGL_CUSTOM", "custom EAGLContext created OK with framebuffer");
@@ -1161,14 +1265,23 @@ unsigned int iOS_GetScreenFramebuffer()
 
 void iOS_SwapWindow(SDL_Window* window)
 {
+    (void)window;
     @autoreleasepool {
-        EAGLContext* ctx = [EAGLContext currentContext];
-        if (ctx) {
-            if (gScreenRenderbuffer) {
-                glBindRenderbuffer(GL_RENDERBUFFER, gScreenRenderbuffer);
-            }
-            [ctx presentRenderbuffer:GL_RENDERBUFFER];
-        }
+        if (gEAGLWindow)
+            iOS_ForceWindowGeometry(gEAGLWindow, iOS_GetDefaultFrame());
+        if (gEAGLView)
+            iOS_ForceViewFrame(gEAGLView, iOS_GetDefaultFrame());
+
+        EAGLContext* ctx = gEAGLContext ?: [EAGLContext currentContext];
+        if (!ctx)
+            return;
+
+        [EAGLContext setCurrentContext:ctx];
+        if (gScreenFramebuffer)
+            glBindFramebuffer(GL_FRAMEBUFFER, gScreenFramebuffer);
+        if (gScreenRenderbuffer)
+            glBindRenderbuffer(GL_RENDERBUFFER, gScreenRenderbuffer);
+        [ctx presentRenderbuffer:GL_RENDERBUFFER];
     }
 }
 }

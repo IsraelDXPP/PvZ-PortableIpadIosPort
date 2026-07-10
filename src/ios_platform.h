@@ -35,6 +35,10 @@ SDL_Window* iOS_CreateWindowSafe(const char* title, int x, int y, int w, int h, 
    Returns an SDL_GLContext (void*) or nullptr on failure. */
 void* iOS_CreateGLContextSafe(struct SDL_Window* window);
 
+/* SDL_GL_GetDrawableSize can stay 0×0 on iOS 9 iPad when UIKit bounds never
+   settle.  Returns true and writes a usable drawable size (fallback 1024×768). */
+bool iOS_GetDrawableSize(struct SDL_Window* window, int* outW, int* outH);
+
 /* Custom swap — called from GLInterface::Flush() on iOS instead of
    SDL_GL_SwapWindow (which uses window->driverdata.context that may not
    be set when we bypass SDL_GL_CreateContext).
