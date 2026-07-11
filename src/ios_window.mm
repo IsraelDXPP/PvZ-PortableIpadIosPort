@@ -85,6 +85,7 @@ static CGSize gSanitizeFallbackSize = {0, 0};
 static UIWindow* gForcedUIWindow = nil;
 static UIWindow* gEAGLWindow = nil;
 static UIView* gEAGLView = nil;
+static CALayer* gEAGLLayer = nil;
 static EAGLContext* gEAGLContext = nil;
 static GLuint gScreenRenderbuffer = 0;
 static GLuint gScreenFramebuffer = 0;
@@ -701,6 +702,34 @@ static CGRect iOS_SwizzledViewGetBounds(id self, SEL _cmd)
     return orig;
 }
 
+// CALayer getter swizzles — intercept reads on our EAGL layer so
+// CoreAnimation always sees valid geometry even if UIKit bypassed
+// the setter and wrote NaN directly to the ivars.
+static CGRect (*gOrigLayerGetBounds)(id, SEL);
+static CGRect (*gOrigLayerGetFrame)(id, SEL);
+
+static CGRect iOS_SwizzledLayerGetBounds(id self, SEL _cmd)
+{
+    CGRect orig = gOrigLayerGetBounds(self, _cmd);
+    if (self == gEAGLLayer && (!iOS_SizeIsValid(orig.size) || isnan(orig.origin.x))) {
+        if (gForcedDrawableSize.width > 0 && gForcedDrawableSize.height > 0) {
+            return CGRectMake(0, 0, gForcedDrawableSize.width, gForcedDrawableSize.height);
+        }
+    }
+    return orig;
+}
+
+static CGRect iOS_SwizzledLayerGetFrame(id self, SEL _cmd)
+{
+    CGRect orig = gOrigLayerGetFrame(self, _cmd);
+    if (self == gEAGLLayer && (!iOS_SizeIsValid(orig.size) || isnan(orig.origin.x))) {
+        if (gForcedDrawableSize.width > 0 && gForcedDrawableSize.height > 0) {
+            return CGRectMake(0, 0, gForcedDrawableSize.width, gForcedDrawableSize.height);
+        }
+    }
+    return orig;
+}
+
 static BOOL gSwizzleActive = NO;
 
 // ---------------------------------------------------------------------------
@@ -772,6 +801,14 @@ static void iOS_SwizzleSetPosition(void)
     m = class_getInstanceMethod([UIView class], @selector(bounds));
     gOrigViewGetBounds = (CGRect (*)(id, SEL))method_getImplementation(m);
     method_setImplementation(m, (IMP)iOS_SwizzledViewGetBounds);
+
+    m = class_getInstanceMethod([CALayer class], @selector(bounds));
+    gOrigLayerGetBounds = (CGRect (*)(id, SEL))method_getImplementation(m);
+    method_setImplementation(m, (IMP)iOS_SwizzledLayerGetBounds);
+
+    m = class_getInstanceMethod([CALayer class], @selector(frame));
+    gOrigLayerGetFrame = (CGRect (*)(id, SEL))method_getImplementation(m);
+    method_setImplementation(m, (IMP)iOS_SwizzledLayerGetFrame);
 }
 
 static void iOS_UnswizzleSetPosition(void)
@@ -1093,6 +1130,9 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
                     if (eaglView) break;
                 }
             }
+            if (eaglView && [eaglView.layer isKindOfClass:[CAEAGLLayer class]]) {
+                gEAGLLayer = (CALayer*)eaglView.layer;
+            }
         }
 
         // ------------------------------------------------------------------
@@ -1147,6 +1187,7 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
 
             if ([eaglView.layer isKindOfClass:[CAEAGLLayer class]]) {
                 eaglLayer = (CAEAGLLayer*)eaglView.layer;
+                gEAGLLayer = eaglLayer;
                 eaglLayer.opaque = YES;
                 eaglLayer.drawableProperties = @{
                     kEAGLDrawablePropertyRetainedBacking: @NO,
@@ -1395,16 +1436,17 @@ void iOS_SwapWindow(SDL_Window* window)
             // composite the renderbuffer; if bounds are 0×0 the 2048×1536
             // buffer gets scaled to fill the window, producing a 2× zoom.
             if (gEAGLView && gForcedDrawableSize.width > 0 && gForcedDrawableSize.height > 0) {
+                CGRect layerRect = CGRectMake(0, 0,
+                    gForcedDrawableSize.width, gForcedDrawableSize.height);
                 [CATransaction begin];
                 [CATransaction setValue:(id)kCFBooleanTrue
                                 forKey:kCATransactionDisableActions];
-                CGRect layerRect = CGRectMake(0, 0,
-                    gForcedDrawableSize.width, gForcedDrawableSize.height);
                 gEAGLView.frame = layerRect;
                 gEAGLView.bounds = layerRect;
                 gEAGLView.layer.bounds = layerRect;
                 gEAGLView.layer.frame = layerRect;
                 [CATransaction commit];
+                [CATransaction flush];
             }
 
             if (gScreenFramebuffer)
