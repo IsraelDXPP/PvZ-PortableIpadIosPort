@@ -1185,6 +1185,19 @@ void GLInterface::UpdateViewport()
 
 	glViewport(vx, vy, vw, vh);
 	mPresentationRect = Rect(vx, vy, vw, vh);
+
+#ifdef __IPHONEOS__
+	{
+		static bool vpDiagDone = false;
+		if (!vpDiagDone) {
+			vpDiagDone = true;
+			char buf[128];
+			snprintf(buf, sizeof(buf), "VP=(%d,%d,%d,%d) game=%dx%d fb=%dx%d",
+				vx, vy, vw, vh, mWidth, mHeight, mFramebufferWidth, mFramebufferHeight);
+			iOS_WriteLogPublic("VIEWPORT", buf);
+		}
+	}
+#endif
 }
 
 int GLInterface::Init(bool IsWindowed)

@@ -1355,6 +1355,46 @@ void iOS_SwapWindow(SDL_Window* window)
 
             [EAGLContext setCurrentContext:ctx];
 
+            // One-time diagnostics: dump layer state before first present.
+            static bool sSwapDiagDone = false;
+            if (!sSwapDiagDone) {
+                sSwapDiagDone = true;
+                char dbuf[256];
+                if (gEAGLView) {
+                    CGRect vf = gEAGLView.frame;
+                    CGRect vb = gEAGLView.bounds;
+                    CGRect lb = gEAGLView.layer.bounds;
+                    CGRect lf = gEAGLView.layer.frame;
+                    CGFloat cs = gEAGLView.layer.contentsScale;
+                    snprintf(dbuf, sizeof(dbuf),
+                        "view.frame=(%.0f,%.0f,%.0f,%.0f) "
+                        "view.bounds=(%.0f,%.0f,%.0f,%.0f) "
+                        "layer.frame=(%.0f,%.0f,%.0f,%.0f) "
+                        "layer.bounds=(%.0f,%.0f,%.0f,%.0f) "
+                        "contentsScale=%.1f forcedSize=(%.0f,%.0f)",
+                        vf.origin.x, vf.origin.y, vf.size.width, vf.size.height,
+                        vb.origin.x, vb.origin.y, vb.size.width, vb.size.height,
+                        lf.origin.x, lf.origin.y, lf.size.width, lf.size.height,
+                        lb.origin.x, lb.origin.y, lb.size.width, lb.size.height,
+                        (double)cs,
+                        (double)gForcedDrawableSize.width, (double)gForcedDrawableSize.height);
+                    iOS_WriteLog("SWAP_DIAG", dbuf);
+                } else {
+                    iOS_WriteLog("SWAP_DIAG", "gEAGLView is nil!");
+                }
+
+                // Also log the renderbuffer size for comparison.
+                if (gScreenRenderbuffer) {
+                    GLint rbW = 0, rbH = 0;
+                    glBindRenderbuffer(GL_RENDERBUFFER, gScreenRenderbuffer);
+                    glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_WIDTH, &rbW);
+                    glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_HEIGHT, &rbH);
+                    snprintf(dbuf, sizeof(dbuf), "rb=%dx%d fb=%d",
+                        rbW, rbH, gScreenFramebuffer);
+                    iOS_WriteLog("SWAP_RB", dbuf);
+                }
+            }
+
             // Force correct layer geometry right before presenting.
             // UIKit's layout system on iOS 9 iPad keeps resetting layer
             // bounds to {0,0}.  CoreAnimation uses layer bounds to
@@ -1367,7 +1407,9 @@ void iOS_SwapWindow(SDL_Window* window)
                 CGRect layerRect = CGRectMake(0, 0,
                     gForcedDrawableSize.width, gForcedDrawableSize.height);
                 gEAGLView.frame = layerRect;
+                gEAGLView.bounds = layerRect;
                 gEAGLView.layer.bounds = layerRect;
+                gEAGLView.layer.frame = layerRect;
                 [CATransaction commit];
             }
 
