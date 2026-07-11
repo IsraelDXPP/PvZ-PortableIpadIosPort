@@ -34,14 +34,7 @@
 #include <chrono>
 #include <cstdarg>
 #include <cstdio>
-
-#ifdef __SWITCH__
-#include <switch.h>
-#elif defined(__3DS__)
-#include <3ds.h>
-#elif defined(__ANDROID__) && !defined(__TERMUX__)
-#include <android/log.h>
-#endif
+#include <SDL.h>
 
 #include "misc/PerfTimer.h"
 
@@ -59,22 +52,45 @@ static inline char ToLowerAscii(char c)
 	return (char)std::tolower((unsigned char)c);
 }
 
+static inline void SexyLogV(SDL_LogPriority thePriority, const char* theFormat, va_list theArgs)
+{
+	std::string aBuffer = Sexy::VFormat(theFormat, theArgs);
+	if (aBuffer.empty())
+		return;
+
+	SDL_LogMessage(SDL_LOG_CATEGORY_APPLICATION, thePriority, "%s", aBuffer.c_str());
+}
+
+static inline bool IsUnicodeSpace(char32_t theChar)
+{
+	switch (theChar)
+	{
+	case 0x0085: case 0x00A0: case 0x1680:
+	case 0x2000: case 0x2001: case 0x2002: case 0x2003:
+	case 0x2004: case 0x2005: case 0x2006: case 0x2007:
+	case 0x2008: case 0x2009: case 0x200A:
+	case 0x2028: case 0x2029: case 0x202F: case 0x205F:
+	case 0x3000:
+		return true;
+	default:
+		return theChar < 0x80 && std::isspace(static_cast<unsigned char>(theChar));
+	}
+}
+
 void Sexy::PrintF(const char *text, ...)
 {
 	va_list args;
 	va_start(args, text);
-	std::string buffer = Sexy::VFormat(text, args);
+	SexyLogV(SDL_LOG_PRIORITY_INFO, text, args);
 	va_end(args);
-	if (buffer.empty())
-		return;
+}
 
-#if defined(__SWITCH__) || defined(__3DS__)
-	svcOutputDebugString(buffer.c_str(), buffer.size());
-#elif defined(__ANDROID__) && !defined(__TERMUX__)
-	__android_log_write(ANDROID_LOG_INFO, "PvZPortable", buffer.c_str());
-#endif
-
-	std::fwrite(buffer.data(), 1, buffer.size(), stdout);
+void Sexy::LogError(const char* theFormat, ...)
+{
+	va_list args;
+	va_start(args, theFormat);
+	SexyLogV(SDL_LOG_PRIORITY_ERROR, theFormat, args);
+	va_end(args);
 }
 
 int Sexy::Rand()
@@ -150,17 +166,36 @@ std::string Sexy::Trim(std::string_view theString)
 		return std::string(theString);
 
 	size_t start = 0;
-	while (start < theString.size() && std::isspace((unsigned char)theString[start]))
-		++start;
+	while (start < theString.size())
+	{
+		size_t aOffset = start;
+		char32_t aChar = 0;
+		if (!UTF8DecodeNext(theString, aOffset, aChar))
+			break;
+		if (!IsUnicodeSpace(aChar))
+			break;
+		start = aOffset;
+	}
 
-	if (start == theString.size())
+	if (start >= theString.size())
 		return std::string();
 
-	size_t end = theString.size() - 1;
-	while (end > start && std::isspace((unsigned char)theString[end]))
-		--end;
+	size_t end = theString.size();
+	while (end > start)
+	{
+		size_t aCharStart = end - 1;
+		while (aCharStart > start && (static_cast<unsigned char>(theString[aCharStart]) & 0xC0) == 0x80)
+			--aCharStart;
+		size_t aOffset = aCharStart;
+		char32_t aChar = 0;
+		if (!UTF8DecodeNext(theString, aOffset, aChar) || aOffset != end)
+			break;
+		if (!IsUnicodeSpace(aChar))
+			break;
+		end = aCharStart;
+	}
 
-	return std::string(theString.substr(start, end - start + 1));
+	return std::string(theString.substr(start, end - start));
 }
 
 bool Sexy::StringToInt(const std::string& theString, int* theIntVal)

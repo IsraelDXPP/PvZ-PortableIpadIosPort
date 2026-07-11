@@ -153,7 +153,7 @@ void SexyAppBase::MakeWindow()
 		if (!mContext)
 		{
 			if (mWindow) { SDL_DestroyWindow((SDL_Window*)mWindow); mWindow = nullptr; }
-			fprintf(stderr, "Failed to create OpenGL ES context.\n");
+			Sexy::LogError("Failed to create OpenGL ES context.");
 			return;
 		}
 #else
@@ -177,8 +177,8 @@ void SexyAppBase::MakeWindow()
 			if (!mContext)
 			{
 				if (mWindow) { SDL_DestroyWindow((SDL_Window*)mWindow); mWindow = nullptr; }
-				fprintf(stderr, "Failed to create any OpenGL context. "
-					"Please check your graphics drivers.\n");
+				Sexy::LogError("Failed to create any OpenGL context. "
+					"Please check your graphics drivers.");
 				return;
 			}
 

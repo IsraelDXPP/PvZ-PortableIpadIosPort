@@ -546,7 +546,7 @@ void* DefinitionUncompressCompiledBuffer(void* theCompressedBuffer, size_t theCo
     // theCompressedBuffer 的前两个四字节存有特殊数据，此处检测其长度是否足够 8 字节（即 2 个四字节）
     if (theCompressedBufferSize < 8)
     {
-        TodTrace("Compile def too small", theCompiledFilePath.c_str());
+        TodTrace("Compile def too small: %s", theCompiledFilePath.c_str());
         return nullptr;
     }
     // 将 theCompressedBuffer 的前两个四字节视为一个 CompressedDefinitionHeader
@@ -701,7 +701,7 @@ void DefinitionXmlError(XMLParser* theXmlParser, const char* theFormat, ...)
 
     int aLine = theXmlParser->GetCurrentLineNum();
     std::string aFileName = theXmlParser->GetFileName();
-    TodTraceAndLog("%s(%d): XML Definition Error: %s\n", aFileName.c_str(), aLine, aFormattedMessage.c_str());
+    TodTraceAndLogLn("%s(%d): XML Definition Error: %s", aFileName.c_str(), aLine, aFormattedMessage.c_str());
 }
 
 bool DefinitionReadXMLString(XMLParser* theXmlParser, std::string& theValue)
@@ -1030,9 +1030,9 @@ bool DefinitionReadFloatTrackField(XMLParser* theXmlParser, FloatParameterTrack*
 
     
     /*
-    TodTraceAndLog("%s | %d", aStringChars, aFloatTrackVec.size());
+    TodTraceAndLogLn("%s | %d", aStringChars, aFloatTrackVec.size());
     for (auto &i : aFloatTrackVec) {
-        TodTraceAndLog("%f", i.mTime);
+        TodTraceAndLogLn("%f", i.mTime);
     }
     */
 

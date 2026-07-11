@@ -21,6 +21,7 @@
 
 #include "SexyAppBase.h"
 #include "TodList.h"
+#include <algorithm>
 #include "TodDebug.h"
 #include "TodCommon.h"
 #include "../LawnApp.h"
@@ -569,7 +570,7 @@ void TodDrawStringMatrix(Graphics* g, const _Font* theFont, const SexyMatrix3& t
 			aRenderCommand->mUseAlphaCorrection = aLayer->mUseAlphaCorrection;
 			aRenderCommand->mNext = nullptr;
 
-			int anOrderIdx = std::min(std::max(anOrder + 128, 0), 255);
+			int anOrderIdx = std::clamp(anOrder + 128, 0, 255);
 			if (gRenderTail[anOrderIdx])
 			{
 				gRenderTail[anOrderIdx]->mNext = aRenderCommand;
@@ -586,10 +587,7 @@ void TodDrawStringMatrix(Graphics* g, const _Font* theFont, const SexyMatrix3& t
 			//{
 			//	aMaxXPos = aCurXPos;
 			//}
-			if (aMaxXPos < aCurXPos + aSpacing + aCharWidth)
-			{
-				aMaxXPos = aCurXPos + aSpacing + aCharWidth;
-			}
+			aMaxXPos = std::max(aMaxXPos, aCurXPos + aSpacing + aCharWidth);
 		}
 
 		aCurXPos = aMaxXPos;
@@ -935,7 +933,7 @@ void FixPixelsOnAlphaEdgeForBlending(Image* theImage)
 	int aDuration = std::max(aTimer.GetDuration(), 0.0);
 	if (aDuration > 20)
 	{
-		TodTraceAndLog("LOADING:Long sanding '%s' %d ms on %s", theImage->mFilePath.c_str(), aDuration, gGetCurrentLevelName().c_str());
+		TodTraceAndLogLn("LOADING:Long sanding '%s' %d ms on %s", theImage->mFilePath.c_str(), aDuration, gGetCurrentLevelName().c_str());
 	}
 }
 
@@ -1084,7 +1082,7 @@ bool TodResourceManager::TodLoadResources(const std::string& theGroup)
 	int aDuration = std::max(aTimer.GetDuration(), 0.0);
 	if (aDuration > 20)
 	{
-		TodTraceAndLog("LOADED: '%s' %d ms on %s", theGroup.c_str(), aDuration, gGetCurrentLevelName().c_str());
+		TodTraceAndLogLn("LOADED: '%s' %d ms on %s", theGroup.c_str(), aDuration, gGetCurrentLevelName().c_str());
 	}
 
 	return true;

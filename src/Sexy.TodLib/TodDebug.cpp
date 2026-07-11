@@ -71,136 +71,78 @@ void TodFree(void* theBlock)
 
 void TodAssertFailed(const char* theCondition, const char* theFile, int theLine, const char* theMsg, ...)
 {
-	char aFormattedMsg[1024];
 	va_list argList;
 	va_start(argList, theMsg);
-	int aCount = TodVsnprintf(aFormattedMsg, sizeof(aFormattedMsg), theMsg, argList);
+	std::string aFormattedMsg = Sexy::VFormat(theMsg, argList);
 	va_end(argList);
 
-	if (aCount != 0) {
-		if (aFormattedMsg[aCount - 1] != '\n')
-		{
-			if (aCount + 1 < 1024)
-			{
-				aFormattedMsg[aCount] = '\n';
-				aFormattedMsg[aCount + 1] = '\0';
-			}
-			else
-			{
-				aFormattedMsg[aCount - 1] = '\n';
-			}
-		}
-	}
-
-	char aBuffer[1024];
+	std::string aBuffer;
 	if (*theCondition != '\0')
-	{
-		TodSnprintf(aBuffer, sizeof(aBuffer), "\n%s(%d)\nassertion failed: '%s'\n%s\n", theFile, theLine, theCondition, aFormattedMsg);
-	}
+		aBuffer = Sexy::StrFormat("\n%s(%d)\nassertion failed: '%s'\n%s", theFile, theLine, theCondition, aFormattedMsg.c_str());
 	else
-	{
-		TodSnprintf(aBuffer, sizeof(aBuffer), "\n%s(%d)\nassertion failed: %s\n", theFile, theLine, aFormattedMsg);
-	}
-	TodTrace("%s", aBuffer);
+		aBuffer = Sexy::StrFormat("\n%s(%d)\nassertion failed: %s", theFile, theLine, aFormattedMsg.c_str());
 
-	TodErrorMessageBox(aBuffer, "Assertion failed");
-
+	TodTrace("%s", aBuffer.c_str());
+	TodErrorMessageBox(aBuffer.c_str(), "Assertion failed");
 	exit(0);
 }
 
-void TodLog(const char* theFormat, ...)
+void TodLogLn(const char* theFormat, ...)
 {
-	char aButter[1024];
 	va_list argList;
 	va_start(argList, theFormat);
-	int aCount = TodVsnprintf(aButter, sizeof(aButter), theFormat, argList);
+	std::string aBuffer = Sexy::VFormat(theFormat, argList);
 	va_end(argList);
 
-	if (aButter[aCount - 1] != '\n')
-	{
-		if (aCount + 1 < 1024)
-		{
-			aButter[aCount] = '\n';
-			aButter[aCount + 1] = '\0';
-		}
-		else
-		{
-			aButter[aCount - 1] = '\n';
-		}
-	}
-
-	TodLogString(aButter);
+	if (!aBuffer.empty())
+		TodLogStringLn(aBuffer.c_str());
 }
 
-void TodLogString(const char* theMsg)
+void TodLogStringLn(const char* theMsg)
 {
 #ifdef PVZ_DEBUG
 	std::ofstream f(Sexy::PathFromU8(gLogFileName), std::ios::app | std::ios::binary);
 	if (!f)
 	{
-		fprintf(stderr, "Failed to open log file '%s'\n", gLogFileName);
+		Sexy::LogError("Failed to open log file '%s'", gLogFileName);
 		return;
 	}
 
-	f.write(theMsg, (std::streamsize)strlen(theMsg));
+	f << theMsg << '\n';
 	if (!f)
 	{
-		fprintf(stderr, "Failed to write to log file\n");
+		Sexy::LogError("Failed to write to log file");
 	}
 #endif
 }
 
 void TodTrace(const char* theFormat, ...)
 {
-	char aButter[1024];
 	va_list argList;
 	va_start(argList, theFormat);
-	int aCount = TodVsnprintf(aButter, sizeof(aButter), theFormat, argList);
+	std::string aBuffer = Sexy::VFormat(theFormat, argList);
 	va_end(argList);
 
-	if (aButter[aCount - 1] != '\n')
-	{
-		if (aCount + 1 < 1024)
-		{
-			aButter[aCount] = '\n';
-			aButter[aCount + 1] = '\0';
-		}
-		else
-		{
-			aButter[aCount - 1] = '\n';
-		}
-	}
-
-	Sexy::PrintF("%s", aButter);
+	if (!aBuffer.empty())
+		Sexy::PrintF("%s", aBuffer.c_str());
 }
 
 void TodHesitationTrace(...)
 {
 }
 
-void TodTraceAndLog(const char* theFormat, ...)
+void TodTraceAndLogLn(const char* theFormat, ...)
 {
-	char aButter[1024];
 	va_list argList;
 	va_start(argList, theFormat);
-	int aCount = TodVsnprintf(aButter, sizeof(aButter), theFormat, argList);
+	std::string aBuffer = Sexy::VFormat(theFormat, argList);
 	va_end(argList);
 
-	if (aButter[aCount - 1] != '\n')
-	{
-		if (aCount + 1 < 1024)
-		{
-			aButter[aCount] = '\n';
-			aButter[aCount + 1] = '\0';
-		}
-		else
-		{
-			aButter[aCount - 1] = '\n';
-		}
-	}
+	if (aBuffer.empty())
+		return;
 
-	Sexy::PrintF("%s", aButter);
-	TodLogString(aButter);
+	Sexy::PrintF("%s", aBuffer.c_str());
+	TodLogStringLn(aBuffer.c_str());
 }
 
 void TodTraceWithoutSpamming(const char* theFormat, ...)
@@ -208,31 +150,17 @@ void TodTraceWithoutSpamming(const char* theFormat, ...)
 	static uint64_t gLastTraceTime = 0LL;
 	uint64_t aTime = time(nullptr);
 	if (aTime < gLastTraceTime)
-	{
 		return;
-	}
 
 	gLastTraceTime = aTime;
-	char aButter[1024];
+
 	va_list argList;
 	va_start(argList, theFormat);
-	int aCount = TodVsnprintf(aButter, sizeof(aButter), theFormat, argList);
+	std::string aBuffer = Sexy::VFormat(theFormat, argList);
 	va_end(argList);
 
-	if (aButter[aCount - 1] != '\n')
-	{
-		if (aCount + 1 < 1024)
-		{
-			aButter[aCount] = '\n';
-			aButter[aCount + 1] = '\0';
-		}
-		else
-		{
-			aButter[aCount - 1] = '\n';
-		}
-	}
-
-	Sexy::PrintF("%s", aButter);
+	if (!aBuffer.empty())
+		Sexy::PrintF("%s", aBuffer.c_str());
 }
 
 void TodAssertInitForApp()
@@ -244,5 +172,5 @@ void TodAssertInitForApp()
 	strcpy(gLogFileName + strlen(gLogFileName), "log.txt");
 	TOD_ASSERT(strlen(gLogFileName) < 512);
 
-	TodLog("Started %d\n", static_cast<uint64_t>(time(nullptr)));
+	TodLogLn("Started %" PRIu64, static_cast<uint64_t>(time(nullptr)));
 }

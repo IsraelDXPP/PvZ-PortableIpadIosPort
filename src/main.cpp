@@ -25,7 +25,6 @@
 #include <cstdlib>
 #include <fstream>
 #include <system_error>
-
 #include <vector>
 using namespace Sexy;
 
@@ -46,6 +45,10 @@ extern "C" {
 #include "ios_platform.h"
 #include <SDL_hints.h>
 extern void install_ios_exception_handler();
+#endif
+
+#ifdef __SWITCH__
+#include <switch.h>
 #endif
 
 #ifdef __EMSCRIPTEN__
@@ -102,6 +105,10 @@ static void BuildUtf8ArgsFromWin32(int& argc, char**& argv)
 // Common game entry shared by all platforms.
 static int run_game(int argc, char** argv)
 {
+#ifdef __SWITCH__
+	consoleDebugInit(debugDevice_SVC);
+#endif
+
 	TodStringListSetColors(gLawnStringFormats, gLawnStringFormatCount);
 	gGetCurrentLevelName = LawnGetCurrentLevelName;
 	gAppCloseRequest = LawnGetCloseRequest;

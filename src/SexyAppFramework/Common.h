@@ -31,6 +31,7 @@
 #include <map>
 #include <cstdlib>
 #include <cstdint>
+#include <cstdarg>
 #include <ctime>
 #if defined(__APPLE__)
 #include "ghc/filesystem.hpp"
@@ -131,6 +132,7 @@ const ulong SEXY_RAND_MAX = 0x7FFFFFFF;
 extern bool			gDebug;
 
 void				PrintF(const char *text, ...);
+void				LogError(const char* theFormat, ...);
 
 int					Rand();
 int					Rand(int range);

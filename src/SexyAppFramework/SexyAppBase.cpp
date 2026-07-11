@@ -507,8 +507,7 @@ bool SexyAppBase::ReadDemoBuffer(std::string &theError)
 
 	ushort aStrLen = 4;
 	if (!aFile.read(reinterpret_cast<char*>(&aStrLen), sizeof(aStrLen))) return false;
-	if (aStrLen > 255)
-		aStrLen = 255;
+	aStrLen = std::min<ushort>(aStrLen, 255);
 	char aStr[256];
 	if (!aFile.read(aStr, aStrLen)) return false;
 	aStr[aStrLen] = '\0';
@@ -1887,15 +1886,19 @@ void SexyAppBase::Popup(const std::string& theString)
 
 	BeginPopup();
 	if (!mShutdown)
+	{
 		Sexy::PrintF("FATAL ERROR\n===\n%s\n", theString.c_str());
-
-#ifdef __SWITCH__
-	ErrorApplicationConfig c;
-	errorApplicationCreate(&c, "Fatal error", theString.c_str());
-	errorApplicationShow(&c);
+#if defined(__SWITCH__)
+		ErrorApplicationConfig c;
+		errorApplicationCreate(&c, "Fatal error", theString.c_str());
+		errorApplicationShow(&c);
 #elif defined(__IPHONEOS__)
-	iOS_ShowBlockingAlert("Fatal Error", theString.c_str());
+		iOS_ShowBlockingAlert("Fatal Error", theString.c_str());
+#elif !defined(__3DS__) && !defined(__EMSCRIPTEN__)
+		if (std::this_thread::get_id() == mPrimaryThreadId)
+			SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "FATAL ERROR", theString.c_str(), NULL);
 #endif
+	}
 
 	EndPopup();
 }
@@ -3007,9 +3010,34 @@ void SexyAppBase::LoadResourceManifest()
 
 void SexyAppBase::ShowResourceError(bool doExit)
 {
-	Popup(mResourceManager->GetErrorText());	
+	const std::string& aError = mResourceManager->GetErrorText();
+#if defined(__IPHONEOS__)
+	// Documents folder is only shown in the Files app / iTunes once it contains a file
+	const std::filesystem::path aResourceDir(GetResourceFolder());
+	const bool aHasGameResources = !aResourceDir.empty() &&
+		std::filesystem::is_regular_file(aResourceDir / "main.pak") &&
+		std::filesystem::is_directory(aResourceDir / "properties");
+	if (!aHasGameResources)
+	{
+		const std::filesystem::path aReadmePath = aResourceDir / "README.txt";
+		if (!aResourceDir.empty() && !std::filesystem::exists(aReadmePath))
+			std::ofstream(aReadmePath, std::ios::out | std::ios::trunc)
+				<< "Place your `main.pak` and `properties/` folder here to play the game.\n";
+	}
+	std::string aMessage =
+		"Please place main.pak and the properties/ folder into the "
+		"PvZ Portable folder using the Files app or Finder/iTunes file sharing.";
+	if (!aError.empty())
+		aMessage += "\n\n(" + aError + ")";
+#else
+	std::string aMessage;
+	if (!aError.empty())
+		aMessage = aError + "\n\n";
+	aMessage += "Please place main.pak and the properties/ folder into:\n" + GetResourceFolder();
+#endif
+	Popup(aMessage);
 	if (doExit)
-		DoExit(0);
+		DoExit(1);
 }
 
 bool SexyAppBase::GetBoolean(std::string_view theId)
@@ -3244,8 +3272,7 @@ void SexyAppBase::HandleCmdLineParam(const std::string& theParamName, const std:
 	else if (theParamName == "-playnum")
 	{
 		int aNum = atoi(theParamValue.c_str())-1;
-		if (aNum<0)
-			aNum=0;
+		aNum = std::max(aNum, 0);
 
 		int aDemoFileNum = GetMaxDemoFileNum(mDemoPrefix, aNum, false)-aNum;
 		mDemoFileName = StrFormat((mDemoPrefix + "%d.dmo").c_str(), aDemoFileNum);
@@ -3433,7 +3460,7 @@ void SexyAppBase::Init()
 
 	if (mGLInterface == nullptr)
 	{
-		fprintf(stderr, "FATAL: Failed to create OpenGL interface.\n");
+		Sexy::LogError("FATAL: Failed to create OpenGL interface.");
 #ifdef __IPHONEOS__
 		iOS_ShowBlockingAlert(
 			"Graphics Error",
@@ -3662,14 +3689,10 @@ void SexyAppBase::ColorizeImage(Image* theImage, const Color& theColor)
 			int aGreen = (((aColor >> 8) & 0xFF) * theColor.mGreen) / 255;
 			int aBlue = ((aColor & 0xFF) * theColor.mBlue) / 255;
 
-			if (aAlpha > 255)
-				aAlpha = 255;
-			if (aRed > 255)
-				aRed = 255;
-			if (aGreen > 255)
-				aGreen = 255;
-			if (aBlue > 255)
-				aBlue = 255;
+			aAlpha = std::min(aAlpha, 255);
+			aRed = std::min(aRed, 255);
+			aGreen = std::min(aGreen, 255);
+			aBlue = std::min(aBlue, 255);
 
 			aBits[i] = (aAlpha << 24) | (aRed << 16) | (aGreen << 8) | (aBlue);
 		}
@@ -3734,14 +3757,10 @@ GLImage* SexyAppBase::CreateColorizedImage(Image* theImage, const Color& theColo
 			int aGreen = (((aColor >> 8) & 0xFF) * theColor.mGreen) / 255;
 			int aBlue = ((aColor & 0xFF) * theColor.mBlue) / 255;
 
-			if (aAlpha > 255)
-				aAlpha = 255;
-			if (aRed > 255)
-				aRed = 255;
-			if (aGreen > 255)
-				aGreen = 255;
-			if (aBlue > 255)
-				aBlue = 255;
+			aAlpha = std::min(aAlpha, 255);
+			aRed = std::min(aRed, 255);
+			aGreen = std::min(aGreen, 255);
+			aBlue = std::min(aBlue, 255);
 
 			aDestBits[i] = (aAlpha << 24) | (aRed << 16) | (aGreen << 8) | (aBlue);
 		}
@@ -3869,12 +3888,10 @@ void SexyAppBase::RotateImageHue(Sexy::MemoryImage *theImage, int theDelta)
 
 		int aColorDiv = (6 * h) / 256;
 		int x = static_cast<int>(y + (v - y) * ((h - (aColorDiv * 256 / 6)) * 6) / 255);
-		if (x > 255)
-			x = 255;
+		x = std::min(x, 255);
 
 		int z = static_cast<int>(v - (v - y) * ((h - (aColorDiv * 256 / 6)) * 6) / 255);
-		if (z < 0)
-			z = 0;
+		z = std::max(z, 0);
 		
 		switch (aColorDiv)
 		{
@@ -3907,12 +3924,10 @@ uint32_t SexyAppBase::HSLToRGB(int h, int s, int l)
 
 	int aColorDiv = (6 * h) / 256;
 	int x = static_cast<int>(y + (v - y) * ((h - (aColorDiv * 256 / 6)) * 6) / 255);
-	if (x > 255)
-		x = 255;
+	x = std::min(x, 255);
 
 	int z = static_cast<int>(v - (v - y) * ((h - (aColorDiv * 256 / 6)) * 6) / 255);
-	if (z < 0)
-		z = 0;
+	z = std::max(z, 0);
 	
 	switch (aColorDiv)
 	{
