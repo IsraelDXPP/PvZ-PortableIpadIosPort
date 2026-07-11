@@ -89,6 +89,7 @@ static CALayer* gEAGLLayer = nil;
 static EAGLContext* gEAGLContext = nil;
 static GLuint gScreenRenderbuffer = 0;
 static GLuint gScreenFramebuffer = 0;
+static CGSize gForcedDrawableSize = {0, 0};
 
 static void iOS_LogSize(char* buf, size_t bufSize, const char* label, CGSize size)
 {
@@ -985,7 +986,6 @@ static UIView* iOS_FindEAGLViewRecursive(UIView* view)
 /// Returns the context, or nullptr on failure.
 /// Stores the intended screen size (in points) so that iOS_SwapWindow can
 /// force the layer geometry right before presentRenderbuffer.
-static CGSize gForcedDrawableSize = {0, 0};
 
 @interface PvZEAGLView : UIView
 @end
