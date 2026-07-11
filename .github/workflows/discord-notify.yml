@@ -1,0 +1,351 @@
+name: Notificaciones Discord
+
+on:
+  push:
+    branches: ["*"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  notificar-discord:
+    name: Enviar notificación a Discord
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enviar notificación a Discord
+        env:
+          DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/1496556124659384350/RyEMVlv_EymF6CQbe4J3pdkRy_kK-2f2dmjot9jYp9jRWQpMXRdflZecDqAaOyuRRHAh"
+        run: |
+          python3 << 'PYEOF'
+          import json, os, subprocess, re
+          from datetime import datetime, timezone
+
+          # ==================== OBTENER DATOS DEL EVENTO ====================
+          event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+          sha = os.environ.get("GITHUB_SHA", "")
+          ref = os.environ.get("GITHUB_REF", "")
+          ref_name = os.environ.get("GITHUB_REF_NAME", "")
+          repo = os.environ.get("GITHUB_REPOSITORY", "")
+          actor = os.environ.get("GITHUB_ACTOR", "")
+          sender_url = f"https://github.com/{actor}"
+          sender_avatar = f"https://avatars.githubusercontent.com/{actor}"
+          server_url = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
+
+          repo_owner, repo_name = repo.split("/", 1) if "/" in repo else (repo, "desconocido")
+          repo_url = f"{server_url}/{repo}"
+
+          # Leer payload del evento
+          event_path = os.environ.get("GITHUB_EVENT_PATH", "")
+          payload = {}
+          if event_path and os.path.exists(event_path):
+              with open(event_path) as f:
+                  payload = json.load(f)
+
+          # ==================== EXTRAEAR INFORMACIÓN SEGÚN EVENTO ====================
+          if event_name == "pull_request":
+              pr = payload.get("pull_request", {})
+              commit_msg = pr.get("title", "Sin mensaje")
+              commit_sha = pr.get("head", {}).get("sha", sha)
+              commit_url = pr.get("html_url", "")
+              author = pr.get("user", {}).get("login", actor)
+              author_avatar = pr.get("user", {}).get("avatar_url", sender_avatar)
+              author_url = pr.get("user", {}).get("html_url", sender_url)
+              base_branch = pr.get("base", {}).get("ref", "?")
+              head_branch = pr.get("head", {}).get("ref", "?")
+              action = payload.get("action", "opened")
+              pr_body = (pr.get("body") or "")[:500]
+              pr_labels = [l.get("name", "") for l in pr.get("labels", [])]
+              pr_mergeable = pr.get("mergeable_state", "unknown")
+              pr_draft = pr.get("draft", False)
+              pr_changed_files = pr.get("changed_files", "?")
+              pr_additions = pr.get("additions", 0)
+              pr_deletions = pr.get("deletions", 0)
+          else:
+              hc = payload.get("head_commit", {}) or {}
+              commit_msg = hc.get("message", "Sin mensaje")
+              commit_sha = sha
+              commit_url = hc.get("url", f"{server_url}/{repo}/commit/{sha}")
+              sender_data = payload.get("sender", {})
+              author = sender_data.get("login", actor)
+              author_avatar = sender_data.get("avatar_url", sender_avatar)
+              author_url = sender_data.get("html_url", sender_url)
+              base_branch = ""
+              head_branch = ref_name
+              action = ""
+              pr_body = ""
+              pr_labels = []
+              pr_mergeable = "unknown"
+              pr_draft = False
+              pr_changed_files = 0
+              pr_additions = 0
+              pr_deletions = 0
+
+          commit_sha_short = commit_sha[:7]
+          commit_msg_first = commit_msg.strip().split("\n")[0][:200]
+
+          # ==================== CLASIFICAR TIPO DE CAMBIO ====================
+          COLOR = 9807270
+          EVENT_ICON = "📝"
+          EVENT_LABEL = "Actualización de código"
+
+          if event_name == "pull_request":
+              colors = {
+                  "opened": (5814783, "🆕", "Pull Request Abierto"),
+                  "reopened": (16776960, "🔄", "Pull Request Reabierto"),
+              }
+              if action == "closed":
+                  if pr.get("merged"):
+                      COLOR, EVENT_ICON, EVENT_LABEL = 3066993, "✅", "Pull Request Fusionado"
+                  else:
+                      COLOR, EVENT_ICON, EVENT_LABEL = 15158332, "❌", "Pull Request Cerrado"
+              elif action in colors:
+                  COLOR, EVENT_ICON, EVENT_LABEL = colors[action]
+              else:
+                  COLOR, EVENT_ICON, EVENT_LABEL = 3447003, "📋", "Pull Request Actualizado"
+          else:
+              if ref.startswith("refs/tags/"):
+                  COLOR, EVENT_ICON, EVENT_LABEL = 15844367, "🏷️", "Nueva Etiqueta"
+              elif ref_name in ("main", "master"):
+                  COLOR, EVENT_ICON, EVENT_LABEL = 3066993, "🚀", "Push a rama principal"
+              elif "feature" in ref_name or ref_name.startswith("feat/"):
+                  COLOR, EVENT_ICON, EVENT_LABEL = 3447003, "⚡", "Nueva funcionalidad"
+              elif "fix" in ref_name or ref_name.startswith("hotfix/"):
+                  COLOR, EVENT_ICON, EVENT_LABEL = 15158332, "🔧", "Corrección de error"
+              elif "dev" in ref_name:
+                  COLOR, EVENT_ICON, EVENT_LABEL = 16776960, "🧪", "Push a rama de desarrollo"
+              elif "release" in ref_name:
+                  COLOR, EVENT_ICON, EVENT_LABEL = 15844367, "📦", "Release"
+              elif "doc" in ref_name:
+                  COLOR, EVENT_ICON, EVENT_LABEL = 12370112, "📚", "Documentación"
+              else:
+                  COLOR, EVENT_ICON, EVENT_LABEL = 9807270, "📝", "Actualización de código"
+
+          # ==================== TIMESTAMP ====================
+          now = datetime.now(timezone.utc)
+          fecha = now.strftime("%d de %B de %Y")
+          hora = now.strftime("%H:%M:%S UTC")
+          timestamp = now.isoformat()
+
+          # ==================== ARCHIVOS MODIFICADOS ====================
+          languages = {}
+          files_list = []
+
+          if event_name == "push":
+              added = hc.get("added", [])
+              removed = hc.get("removed", [])
+              modified = hc.get("modified", [])
+
+              for f in added:
+                  files_list.append(("➕", f))
+              for f in removed:
+                  files_list.append(("➖", f))
+              for f in modified:
+                  files_list.append(("✏️", f))
+
+              # Detectar lenguajes
+              ext_map = {
+                  "C++": [".cpp", ".cc", ".cxx", ".h", ".hpp", ".hxx"],
+                  "C": [".c"],
+                  "Obj-C": [".mm", ".m"],
+                  "Python": [".py"],
+                  "Java": [".java"],
+                  "CMake": ["CMakeLists.txt", ".cmake"],
+                  "YAML": [".yml", ".yaml"],
+                  "Shell": [".sh"],
+                  "Gradle": [".gradle"],
+                  "JavaScript": [".js", ".ts"],
+                  "Swift": [".swift"],
+                  "Kotlin": [".kt"],
+              }
+              all_files = added + removed + modified
+              for lang, exts in ext_map.items():
+                  count = sum(1 for f in all_files if any(f.endswith(e) or f.split("/")[-1] == e for e in exts))
+                  if count > 0:
+                      languages[lang] = count
+
+          total_files = len(files_list) if files_list else (pr_changed_files if event_name == "pull_request" else 0)
+
+          # ==================== CONSTRUIR CAMPOS ====================
+          fields = []
+
+          fields.append({
+              "name": f"{EVENT_ICON} Tipo de Cambio",
+              "value": EVENT_LABEL,
+              "inline": True
+          })
+          fields.append({
+              "name": "🌿 Rama",
+              "value": f"`{head_branch}`",
+              "inline": True
+          })
+          fields.append({
+              "name": "🔢 Revisión",
+              "value": f"`{commit_sha_short}`",
+              "inline": True
+          })
+          fields.append({
+              "name": "💬 Mensaje del Commit",
+              "value": f"```{commit_msg_first[:950]}```",
+              "inline": False
+          })
+
+          if event_name == "pull_request":
+              fields.append({
+                  "name": "🔀 Rama Origen → Destino",
+                  "value": f"`{head_branch}` → `{base_branch}`",
+                  "inline": False
+              })
+              fields.append({
+                  "name": "📊 Estadísticas del PR",
+                  "value": f"📁 **{pr_changed_files}** archivos  |  ➕ **{pr_additions}** adiciones  |  ➖ **{pr_deletions}** eliminaciones",
+                  "inline": False
+              })
+              if pr_labels:
+                  fields.append({
+                      "name": "🏷️ Etiquetas",
+                      "value": " ".join(f"`{l}`" for l in pr_labels),
+                      "inline": False
+                  })
+              if pr_draft:
+                  fields.append({
+                      "name": "⚠️ Estado",
+                      "value": "🚧 **Borrador (Draft)**",
+                      "inline": True
+                  })
+              fields.append({
+                  "name": "🔒 Mergeable",
+                  "value": f"`{pr_mergeable}`",
+                  "inline": True
+              })
+              if pr_body.strip():
+                  fields.append({
+                      "name": "📝 Descripción del PR",
+                      "value": f"{pr_body[:800]}{'...' if len(pr_body) > 800 else ''}",
+                      "inline": False
+                  })
+
+          if event_name == "push":
+              fields.append({
+                  "name": "📊 Archivos Modificados",
+                  "value": f"**{total_files}** archivo(s) afectados",
+                  "inline": True
+              })
+              fields.append({
+                  "name": "⏱️ Timestamp",
+                  "value": f"{fecha} — {hora}",
+                  "inline": True
+              })
+
+              if languages:
+                  lang_str = "  ".join(f"**{lang}**: `{cnt}`" for lang, cnt in sorted(languages.items(), key=lambda x: -x[1]))
+                  fields.append({
+                      "name": "💻 Lenguajes Afectados",
+                      "value": lang_str,
+                      "inline": False
+                  })
+
+              if files_list:
+                  MAX_FILES = 15
+                  file_lines = []
+                  for i, (icon, fpath) in enumerate(files_list[:MAX_FILES]):
+                      file_lines.append(f"{icon} `{fpath}`")
+                  if len(files_list) > MAX_FILES:
+                      remaining = len(files_list) - MAX_FILES
+                      file_lines.append(f"...y `{remaining}` archivo(s) más")
+                  fields.append({
+                      "name": "📂 Archivos",
+                      "value": "\n".join(file_lines)[:1024],
+                      "inline": False
+                  })
+
+              # Commit anterior
+              before = payload.get("before", "0" * 40)
+              if before != "0" * 40:
+                  diff_url = f"{server_url}/{repo}/compare/{before[:7]}...{commit_sha_short}"
+                  fields.append({
+                      "name": "🔗 Ver Cambios Completos",
+                      "value": f"[Comparación diff]({diff_url})",
+                      "inline": False
+                  })
+          else:
+              fields.append({
+                  "name": "📅 Fecha",
+                  "value": f"{fecha} — {hora}",
+                  "inline": False
+              })
+              fields.append({
+                  "name": "🔗 Ver Pull Request",
+                  "value": f"[Abrir PR en GitHub]({commit_url})",
+                  "inline": False
+              })
+
+          # ==================== FOOTER Y EMBED ====================
+          FOOTER_TEXT = "🌱 PvZ-Portable • iOS/iPadOS Port • GitHub Actions"
+
+          embed = {
+              "title": f"{EVENT_ICON} {repo_owner}/{repo_name} — {EVENT_LABEL}",
+              "description": (
+                  f"**Resumen del cambio en el repositorio:**\n\n"
+                  f"> **Autor:** [{author}]({author_url})\n"
+                  f"> **Repositorio:** [{repo}]({repo_url})\n"
+                  f"> **Commit:** [`{commit_sha_short}`]({commit_url})\n\n"
+                  f"---"
+              ),
+              "url": commit_url,
+              "color": COLOR,
+              "author": {
+                  "name": author,
+                  "url": author_url,
+                  "icon_url": author_avatar
+              },
+              "thumbnail": {
+                  "url": "https://raw.githubusercontent.com/wszqkzqk/PvZ-Portable/main/icon.png"
+              },
+              "fields": fields,
+              "footer": {
+                  "text": FOOTER_TEXT,
+                  "icon_url": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png"
+              },
+              "timestamp": timestamp,
+              "image": {
+                  "url": "https://raw.githubusercontent.com/wszqkzqk/PvZ-Portable/main/icon-readme.png"
+              }
+          }
+
+          # No exceder 10 embeds (Discord limit)
+          payload_discord = {
+              "username": "🌿 PvZ-Portable Bot",
+              "avatar_url": "https://raw.githubusercontent.com/wszqkzqk/PvZ-Portable/main/icon.png",
+              "content": None,
+              "embeds": [embed]
+          }
+
+          # ==================== ENVIAR A DISCORD ====================
+          with open("/tmp/discord_payload.json", "w") as f:
+              json.dump(payload_discord, f, ensure_ascii=False)
+
+          print(f"✅ Payload generado correctamente ({len(json.dumps(payload_discord))} bytes)")
+          print(f"   Evento: {event_name}")
+          print(f"   Autor: {author}")
+          print(f"   Tipo: {EVENT_LABEL}")
+          print(f"   Rama: {head_branch}")
+          print(f"   Commit: {commit_sha_short}")
+          print(f"   Archivos: {total_files}")
+          PYEOF
+
+      - name: Enviar payload a Discord
+        env:
+          DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/1496556124659384350/RyEMVlv_EymF6CQbe4J3pdkRy_kK-2f2dmjot9jYp9jRWQpMXRdflZecDqAaOyuRRHAh"
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -H "Content-Type: application/json" \
+            -d @/tmp/discord_payload.json \
+            "$DISCORD_WEBHOOK_URL")
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | head -n -1)
+
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            echo "✅ Notificación enviada a Discord correctamente (HTTP $HTTP_CODE)"
+          else
+            echo "⚠️ Discord respondió con HTTP $HTTP_CODE"
+            echo "$BODY"
+          fi
