@@ -1072,6 +1072,8 @@ GLInterface::GLInterface(SexyAppBase* theApp)
 	mHeight = mApp->mHeight;
 	mDisplayWidth  = mWidth;
 	mDisplayHeight = mHeight;
+	mFramebufferWidth  = mWidth;
+	mFramebufferHeight = mHeight;
 	mPresentationRect = Rect(0, 0, mWidth, mHeight);
 	mRefreshRate = 60;
 	mMillisecondsPerFrame = 1000 / mRefreshRate;
@@ -1128,6 +1130,16 @@ void GLInterface::Remove3DData(MemoryImage* theImage)
 
 GLImage* GLInterface::GetScreenImage() { return mScreenImage; }
 
+void GLInterface::UpdateProjection()
+{
+	if (gProgram == 0)
+		return;
+	float ortho[16];
+	MakeOrthoMatrix(0, (float)mWidth, (float)mHeight, 0, -10, 10, ortho);
+	glUseProgram(gProgram);
+	glUniformMatrix4fv(gUfViewProjMtx, 1, GL_FALSE, ortho);
+}
+
 void GLInterface::UpdateViewport()
 {
 	int vx = 0, vy = 0, vw, vh;
@@ -1144,6 +1156,15 @@ void GLInterface::UpdateViewport()
 #endif
 #endif
 
+	// Guard against zero/invalid drawable sizes
+	if (width <= 0) width = mWidth;
+	if (height <= 0) height = mHeight;
+
+	// Store actual framebuffer pixel dimensions for diagnostics and
+	// future use (e.g. resolution-dependent logic).
+	mFramebufferWidth  = width;
+	mFramebufferHeight = height;
+
 	vw = width; vh = height;
 
 	// Letterbox to 4:3
@@ -1157,6 +1178,10 @@ void GLInterface::UpdateViewport()
 		vh = width * 3 / 4;
 		vy = (height - vh) / 2;
 	}
+
+	// Safety: ensure viewport dimensions are positive
+	if (vw <= 0) vw = 1;
+	if (vh <= 0) vh = 1;
 
 	glViewport(vx, vy, vw, vh);
 	mPresentationRect = Rect(vx, vy, vw, vh);
@@ -1204,9 +1229,7 @@ int GLInterface::Init(bool IsWindowed)
 	gLinearFilter = false;
 
 	glUseProgram(gProgram);
-	float ortho[16];
-	MakeOrthoMatrix(0, (float)mWidth, (float)mHeight, 0, -10, 10, ortho);
-	glUniformMatrix4fv(gUfViewProjMtx, 1, GL_FALSE, ortho);
+	UpdateProjection();
 	glUniform1i(gUfTexture, 0);
 	glUniform1i(gUfClampUvEnabled, 1);
 

@@ -558,18 +558,10 @@ extern "C" bool iOS_WaitForValidScreenBounds(int* outW, int* outH, int maxWaitMs
 
 extern "C" bool iOS_GetDrawableSize(SDL_Window* window, int* outW, int* outH)
 {
-    int w = 0;
-    int h = 0;
-
-    if (window)
-        SDL_GL_GetDrawableSize(window, &w, &h);
-
-    if (w >= 64 && h >= 64) {
-        if (outW) *outW = w;
-        if (outH) *outH = h;
-        return true;
-    }
-
+    // Priority 1: Query the actual renderbuffer dimensions.
+    // This is the authoritative source when using a custom EAGLContext
+    // (the renderbuffer was created from the CAEAGLLayer and reflects the
+    // true pixel size of the rendering surface).
     if (gScreenRenderbuffer) {
         GLint rbW = 0;
         GLint rbH = 0;
@@ -583,6 +575,22 @@ extern "C" bool iOS_GetDrawableSize(SDL_Window* window, int* outW, int* outH)
         }
     }
 
+    // Priority 2: SDL_GL_GetDrawableSize.
+    // Works correctly when SDL manages the GL context and framebuffer.
+    // May return incorrect values when a custom EAGLContext is used (SDL
+    // has no knowledge of our custom framebuffer).
+    int w = 0;
+    int h = 0;
+    if (window)
+        SDL_GL_GetDrawableSize(window, &w, &h);
+
+    if (w >= 64 && h >= 64) {
+        if (outW) *outW = w;
+        if (outH) *outH = h;
+        return true;
+    }
+
+    // Priority 3: Screen size fallback (points, not pixels).
     const CGSize fb = iOS_GetReliableScreenSize();
     if (outW) *outW = (int)fb.width;
     if (outH) *outH = (int)fb.height;
@@ -1100,15 +1108,6 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
                 UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
             iOS_ForceViewFrame(eaglView, fbFrame);
 
-            // Force CATransaction to commit the frame immediately
-            [CATransaction begin];
-            [CATransaction setValue:(id)kCFBooleanTrue forKey:kCATransactionDisableActions];
-            eaglView.layer.bounds = CGRectMake(0, 0, fb.width, fb.height);
-            [CATransaction commit];
-
-            [eaglView setNeedsLayout];
-            [eaglView layoutIfNeeded];
-
             if ([eaglView.layer isKindOfClass:[CAEAGLLayer class]]) {
                 eaglLayer = (CAEAGLLayer*)eaglView.layer;
                 eaglLayer.opaque = YES;
@@ -1116,19 +1115,49 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
                     kEAGLDrawablePropertyRetainedBacking: @NO,
                     kEAGLDrawablePropertyColorFormat: kEAGLColorFormatRGBA8
                 };
+
+                // Set contentsScale so renderbufferStorage:fromDrawable:
+                // allocates a renderbuffer at native pixel resolution.
+                // renderbufferStorage uses: layer.bounds * contentsScale.
+                // Layer bounds are in POINTS (fb.width/height); contentsScale
+                // multiplies them to PIXELS for the renderbuffer.
+                CGFloat screenScale = [UIScreen mainScreen].scale;
+                if (screenScale < 1.0) screenScale = 1.0;
+                eaglLayer.contentsScale = screenScale;
+
+                // Layer bounds in POINTS — contentsScale handles pixel conversion.
+                [CATransaction begin];
+                [CATransaction setValue:(id)kCFBooleanTrue forKey:kCATransactionDisableActions];
+                eaglView.layer.bounds = CGRectMake(0, 0, fb.width, fb.height);
+                [CATransaction commit];
+
+                [eaglView setNeedsLayout];
+                [eaglView layoutIfNeeded];
+            } else {
+                // Force CATransaction to commit the frame immediately
+                [CATransaction begin];
+                [CATransaction setValue:(id)kCFBooleanTrue forKey:kCATransactionDisableActions];
+                eaglView.layer.bounds = CGRectMake(0, 0, fb.width, fb.height);
+                [CATransaction commit];
+
+                [eaglView setNeedsLayout];
+                [eaglView layoutIfNeeded];
             }
         }
 
         // Let CoreAnimation commit the layer changes before querying it.
         // Wait in a loop until bounds are actually non-zero (up to 500ms).
         if (eaglLayer) {
+            // Layer bounds in POINTS — contentsScale handles pixel conversion
+            // (renderbufferStorage uses bounds * contentsScale).
+
             char lb[64];
             iOS_LogSize(lb, sizeof(lb), "layerBnd", eaglLayer.bounds.size);
             iOS_WriteLog("LAYER_BEFORE", lb);
 
             for (int wi = 0; wi < 10 && !iOS_SizeIsValid(eaglLayer.bounds.size); wi++) {
                 iOS_PumpRunLoopMs(50);
-                // Re-apply bounds if they got reset
+                // Re-apply bounds in points if they got reset
                 [CATransaction begin];
                 [CATransaction setValue:(id)kCFBooleanTrue forKey:kCATransactionDisableActions];
                 eaglLayer.bounds = CGRectMake(0, 0, fb.width, fb.height);
@@ -1138,7 +1167,7 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
             iOS_LogSize(lb, sizeof(lb), "layerBnd", eaglLayer.bounds.size);
             iOS_WriteLog("LAYER_AFTER", lb);
 
-            // If still 0x0, force it directly on the model layer
+            // If still 0x0, force it directly on the model layer (in points)
             if (!iOS_SizeIsValid(eaglLayer.bounds.size)) {
                 eaglLayer.bounds = CGRectMake(0, 0, fb.width, fb.height);
                 [CATransaction flush];
@@ -1183,8 +1212,11 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
                     GLint rbW = 0, rbH = 0;
                     glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_WIDTH, &rbW);
                     glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_HEIGHT, &rbH);
-                    char rbb[64];
-                    snprintf(rbb, sizeof(rbb), "rb=%dx%d", rbW, rbH);
+                    char rbb[128];
+                    snprintf(rbb, sizeof(rbb), "rb=%dx%d layerBnd=%.0fx%.0f scale=%.1f",
+                        rbW, rbH,
+                        (double)eaglLayer.bounds.size.width, (double)eaglLayer.bounds.size.height,
+                        (double)eaglLayer.contentsScale);
                     iOS_WriteLog("GL_RB_SIZE", rbb);
 
                     GLuint fb = 0;

@@ -186,6 +186,12 @@ public:
 	int						mDisplayWidth;
 	int						mDisplayHeight;
 
+	// Actual framebuffer pixel dimensions (set by UpdateViewport).
+	// On iOS this comes from the renderbuffer query, which is the
+	// authoritative source regardless of SDL or screen size reporting.
+	int						mFramebufferWidth;
+	int						mFramebufferHeight;
+
 	Rect					mPresentationRect;
 	int						mRefreshRate;
 	int						mMillisecondsPerFrame;
@@ -217,6 +223,7 @@ public:
 
 	GLImage*				GetScreenImage();
 	void					UpdateViewport();
+	void					UpdateProjection();
 	int						Init(bool IsWindowed);
 	bool					Redraw(Rect* theClipRect = nullptr);
 	void					SetVideoOnlyDraw(bool videoOnly);
