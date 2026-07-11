@@ -703,7 +703,7 @@ static CGRect iOS_SwizzledViewGetBounds(id self, SEL _cmd)
     return orig;
 }
 
-// CALayer getter swizzles — intercept reads on our EAGL layer so
+// CALayer getter swizzles — intercept reads on ALL layers so
 // CoreAnimation always sees valid geometry even if UIKit bypassed
 // the setter and wrote NaN directly to the ivars.
 static CGRect (*gOrigLayerGetBounds)(id, SEL);
@@ -712,10 +712,11 @@ static CGRect (*gOrigLayerGetFrame)(id, SEL);
 static CGRect iOS_SwizzledLayerGetBounds(id self, SEL _cmd)
 {
     CGRect orig = gOrigLayerGetBounds(self, _cmd);
-    if (self == gEAGLLayer && (!iOS_SizeIsValid(orig.size) || isnan(orig.origin.x))) {
+    if (!iOS_SizeIsValid(orig.size) || isnan(orig.origin.x)) {
         if (gForcedDrawableSize.width > 0 && gForcedDrawableSize.height > 0) {
             return CGRectMake(0, 0, gForcedDrawableSize.width, gForcedDrawableSize.height);
         }
+        return iOS_GetDefaultFrame();
     }
     return orig;
 }
@@ -723,10 +724,11 @@ static CGRect iOS_SwizzledLayerGetBounds(id self, SEL _cmd)
 static CGRect iOS_SwizzledLayerGetFrame(id self, SEL _cmd)
 {
     CGRect orig = gOrigLayerGetFrame(self, _cmd);
-    if (self == gEAGLLayer && (!iOS_SizeIsValid(orig.size) || isnan(orig.origin.x))) {
+    if (!iOS_SizeIsValid(orig.size) || isnan(orig.origin.x)) {
         if (gForcedDrawableSize.width > 0 && gForcedDrawableSize.height > 0) {
             return CGRectMake(0, 0, gForcedDrawableSize.width, gForcedDrawableSize.height);
         }
+        return iOS_GetDefaultFrame();
     }
     return orig;
 }
