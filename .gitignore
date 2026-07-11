@@ -415,3 +415,5 @@ tools/read-compiled/target
 *.sublime-workspace
 
 build-*/
+syslog.txt
+syslog_manual.txt
