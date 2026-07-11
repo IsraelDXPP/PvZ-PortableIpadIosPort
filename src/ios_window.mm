@@ -947,12 +947,47 @@ static UIView* iOS_FindEAGLViewRecursive(UIView* view)
 ///   6. Set the context as current; return it as an SDL_GLContext.
 ///
 /// Returns the context, or nullptr on failure.
+/// Stores the intended screen size (in points) so that iOS_SwapWindow can
+/// force the layer geometry right before presentRenderbuffer.
+static CGSize gForcedDrawableSize = {0, 0};
+
 @interface PvZEAGLView : UIView
 @end
 
 @implementation PvZEAGLView
 + (Class)layerClass {
     return [CAEAGLLayer class];
+}
+
+/// UIKit's layout system on iOS 9 iPad keeps resetting layer bounds to {0,0}
+/// even after we explicitly set them.  By overriding layoutSubviews and NOT
+/// calling [super], we prevent UIKit from zeroing out our geometry.
+- (void)layoutSubviews {
+    if (gForcedDrawableSize.width > 0 && gForcedDrawableSize.height > 0) {
+        self.layer.bounds = CGRectMake(0, 0,
+            gForcedDrawableSize.width, gForcedDrawableSize.height);
+    }
+}
+
+/// Also block setFrame:/setBounds: from UIKit when they would reset to zero.
+- (void)setFrame:(CGRect)frame {
+    if (gForcedDrawableSize.width > 0 && gForcedDrawableSize.height > 0) {
+        if (frame.size.width < 64 || frame.size.height < 64) {
+            frame.size.width  = gForcedDrawableSize.width;
+            frame.size.height = gForcedDrawableSize.height;
+        }
+    }
+    [super setFrame:frame];
+}
+
+- (void)setBounds:(CGRect)bounds {
+    if (gForcedDrawableSize.width > 0 && gForcedDrawableSize.height > 0) {
+        if (bounds.size.width < 64 || bounds.size.height < 64) {
+            bounds.size.width  = gForcedDrawableSize.width;
+            bounds.size.height = gForcedDrawableSize.height;
+        }
+    }
+    [super setBounds:bounds];
 }
 @end
 
@@ -1080,13 +1115,17 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
             gForcedUIWindow = eaglWindow;
             gEAGLWindow = eaglWindow;
 
-            eaglView = [[PvZEAGLView alloc] initWithFrame:eaglVC.view.bounds];
+            // Store the intended drawable size so that PvZEAGLView can
+            // defend its geometry against UIKit layout resets.
+            gForcedDrawableSize = CGSizeMake(fb.width, fb.height);
+
+            eaglView = [[PvZEAGLView alloc] initWithFrame:screenBounds];
             eaglView.autoresizingMask =
                 UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
             eaglView.backgroundColor = [UIColor blackColor];
             [eaglVC.view addSubview:eaglView];
             [eaglVC.view bringSubviewToFront:eaglView];
-            iOS_ForceViewFrame(eaglView, eaglVC.view.bounds);
+            iOS_ForceViewFrame(eaglView, screenBounds);
             iOS_HideBrokenSDLWindows(eaglWindow);
 
             char lbuf[128];
@@ -1315,6 +1354,23 @@ void iOS_SwapWindow(SDL_Window* window)
                 return;
 
             [EAGLContext setCurrentContext:ctx];
+
+            // Force correct layer geometry right before presenting.
+            // UIKit's layout system on iOS 9 iPad keeps resetting layer
+            // bounds to {0,0}.  CoreAnimation uses layer bounds to
+            // composite the renderbuffer; if bounds are 0×0 the 2048×1536
+            // buffer gets scaled to fill the window, producing a 2× zoom.
+            if (gEAGLView && gForcedDrawableSize.width > 0 && gForcedDrawableSize.height > 0) {
+                [CATransaction begin];
+                [CATransaction setValue:(id)kCFBooleanTrue
+                                forKey:kCATransactionDisableActions];
+                CGRect layerRect = CGRectMake(0, 0,
+                    gForcedDrawableSize.width, gForcedDrawableSize.height);
+                gEAGLView.frame = layerRect;
+                gEAGLView.layer.bounds = layerRect;
+                [CATransaction commit];
+            }
+
             if (gScreenFramebuffer)
                 glBindFramebuffer(GL_FRAMEBUFFER, gScreenFramebuffer);
             if (gScreenRenderbuffer)
