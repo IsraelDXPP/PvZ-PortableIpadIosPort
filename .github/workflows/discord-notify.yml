@@ -119,11 +119,13 @@ jobs:
               else:
                   COLOR, EVENT_ICON, EVENT_LABEL = 9807270, "📝", "Actualización de código"
 
-          # ==================== TIMESTAMP ====================
+          # ==================== TIMESTAMP (Discord native) ====================
           now = datetime.now(timezone.utc)
-          fecha = now.strftime("%d de %B de %Y")
-          hora = now.strftime("%H:%M:%S UTC")
-          timestamp = now.isoformat()
+          unix_ts = int(now.timestamp())
+          # Discord dynamic timestamps: se renderizan en la zona horaria de cada usuario
+          # F = día + fecha + hora completa | R = relativo ("hace 5 min")
+          DISCord_TS_F = f"<t:{unix_ts}:F>"
+          DISCORD_TS_R = f"<t:{unix_ts}:R>"
 
           # ==================== ARCHIVOS MODIFICADOS ====================
           languages = {}
@@ -231,7 +233,7 @@ jobs:
               })
               fields.append({
                   "name": "⏱️ Timestamp",
-                  "value": f"{fecha} — {hora}",
+                  "value": f"{DISCord_TS_F}\n{DISCORD_TS_R}",
                   "inline": True
               })
 
@@ -269,7 +271,7 @@ jobs:
           else:
               fields.append({
                   "name": "📅 Fecha",
-                  "value": f"{fecha} — {hora}",
+                  "value": f"{DISCord_TS_F}\n{DISCORD_TS_R}",
                   "inline": False
               })
               fields.append({
@@ -305,7 +307,7 @@ jobs:
                   "text": FOOTER_TEXT,
                   "icon_url": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png"
               },
-              "timestamp": timestamp,
+              "timestamp": now.isoformat(),
               "image": {
                   "url": "https://raw.githubusercontent.com/wszqkzqk/PvZ-Portable/main/icon-readme.png"
               }
