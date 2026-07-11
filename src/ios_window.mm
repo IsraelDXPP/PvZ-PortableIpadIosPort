@@ -845,7 +845,6 @@ extern "C" SDL_Window* iOS_CreateWindowSafe(
         @catch (NSException* ex) {
             iOS_WriteLog("SDL_CREATE_WINDOW_EXCEPTION",
                 ex.reason.UTF8String ?: "unknown");
-            iOS_UnswizzleSetPosition();
             return nullptr;
         }
 
@@ -1002,7 +1001,6 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
         SDL_GLContext directCtx = SDL_GL_CreateContext(window);
         if (directCtx) {
             iOS_WriteLog("SDL_GL_CREATECONTEXT", "SDL_GL_CreateContext succeeded directly!");
-            iOS_UnswizzleSetPosition();
             return directCtx;
         }
         // Ensure swizzle is active
@@ -1284,10 +1282,6 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
 
         if (!ctx) {
             iOS_WriteLog("CTX_FAIL", "no GL context could be created (SDL or custom)");
-        }
-
-        if (ctx) {
-            iOS_UnswizzleSetPosition();
         }
 
         return ctx;
