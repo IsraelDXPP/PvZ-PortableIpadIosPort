@@ -1110,6 +1110,26 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
         SDL_GLContext directCtx = SDL_GL_CreateContext(window);
         if (directCtx) {
             iOS_WriteLog("SDL_GL_CREATECONTEXT", "SDL_GL_CreateContext succeeded directly!");
+            
+            CGSize fb;
+            iOS_MeasureScreenSize(&fb);
+            if (!iOS_SizeIsValid(fb.width, fb.height))
+                fb = CGSizeMake(1024, 768);
+            if (fb.width < fb.height) {
+                CGFloat t = fb.width; fb.width = fb.height; fb.height = t;
+            }
+            gForcedDrawableSize = fb;
+
+            for (UIWindow* win in [UIApplication sharedApplication].windows) {
+                UIView* ev = iOS_FindEAGLViewRecursive(win);
+                if (ev) {
+                    gEAGLView = ev;
+                    if ([ev.layer isKindOfClass:[CAEAGLLayer class]]) {
+                        gEAGLLayer = ev.layer;
+                    }
+                    break;
+                }
+            }
             return directCtx;
         }
         // Ensure swizzle is active
