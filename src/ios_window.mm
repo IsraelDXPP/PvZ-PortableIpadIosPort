@@ -922,6 +922,28 @@ static void iOS_UnswizzleSetPosition(void)
 extern "C" SDL_Window* iOS_CreateWindowSafe(
     const char* title, int x, int y, int w, int h, Uint32 flags)
 {
+    char infoBuf[256];
+    snprintf(infoBuf, sizeof(infoBuf), "Arch: ptr=%d, cgfloat=%d, arm=%d, arm64=%d, lp64=%d, stret=%d",
+        (int)sizeof(void*), (int)sizeof(CGFloat),
+#if defined(__arm__)
+        1,
+#else
+        0,
+#endif
+#if defined(__arm64__) || defined(__aarch64__)
+        1,
+#else
+        0,
+#endif
+#if defined(__LP64__)
+        1,
+#else
+        0,
+#endif
+        STRET_SIGNATURE
+    );
+    iOS_WriteLog("ARCH_INFO", infoBuf);
+
     // Install geometry swizzles BEFORE any UIKit / SDL layer manipulation.
     iOS_SwizzleSetPosition();
     iOS_SwizzleUIScreenBounds();
