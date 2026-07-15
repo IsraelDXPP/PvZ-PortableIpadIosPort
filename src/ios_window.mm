@@ -52,12 +52,12 @@ static const CGFloat kIOSDefaultWidth  = 1024.0f;
 static const CGFloat kIOSDefaultHeight = 768.0f;
 #endif
 
-static BOOL iOS_SizeIsValid(CGSize size)
+static BOOL iOS_SizeIsValid(CGFloat width, CGFloat height)
 {
     // Reject denormals / garbage UIKit values that pass "> 0" but round to 0.
-    return (int)size.width >= 64 && (int)size.height >= 64 &&
-           !std::isnan(size.width) && !std::isnan(size.height) &&
-           !std::isinf(size.width) && !std::isinf(size.height);
+    return (int)width >= 64 && (int)height >= 64 &&
+           !std::isnan(width) && !std::isnan(height) &&
+           !std::isinf(width) && !std::isinf(height);
 }
 
 static void iOS_EnsureLandscape(CGSize* size)
@@ -91,12 +91,12 @@ static GLuint gScreenRenderbuffer = 0;
 static GLuint gScreenFramebuffer = 0;
 static CGSize gForcedDrawableSize = {0, 0};
 
-static void iOS_LogSize(char* buf, size_t bufSize, const char* label, CGSize size)
+static void iOS_LogSize(char* buf, size_t bufSize, const char* label, CGFloat width, CGFloat height)
 {
-    if (isnan(size.width) || isnan(size.height)) {
+    if (std::isnan(width) || std::isnan(height)) {
         snprintf(buf, bufSize, "%s=nan", label);
     } else {
-        snprintf(buf, bufSize, "%s=%.0fx%.0f", label, (double)size.width, (double)size.height);
+        snprintf(buf, bufSize, "%s=%.0fx%.0f", label, (double)width, (double)height);
     }
 }
 
@@ -154,7 +154,7 @@ static void iOS_HideBrokenSDLWindows(UIWindow* keepVisible)
     for (UIWindow* win in [UIApplication sharedApplication].windows) {
         if (win == keepVisible)
             continue;
-        if (!iOS_SizeIsValid(win.bounds.size) || !iOS_SizeIsValid(win.frame.size))
+        if (!iOS_SizeIsValid(win.bounds.size.width, win.bounds.size.height) || !iOS_SizeIsValid(win.frame.size.width, win.frame.size.height))
             win.hidden = YES;
     }
 }
@@ -167,7 +167,7 @@ static BOOL iOS_MeasureScreenSize(CGSize* outSize)
         return NO;
 
     CGRect bounds = screen.bounds;
-    if (iOS_SizeIsValid(bounds.size)) {
+    if (iOS_SizeIsValid(bounds.size.width, bounds.size.height)) {
         *outSize = bounds.size;
         gSanitizeFallbackSize = bounds.size;
         return YES;
@@ -177,7 +177,7 @@ static BOOL iOS_MeasureScreenSize(CGSize* outSize)
         CGRect native = screen.nativeBounds;
         CGFloat scale = screen.scale > 0.0f ? screen.scale : 1.0f;
         CGSize points = CGSizeMake(native.size.width / scale, native.size.height / scale);
-        if (iOS_SizeIsValid(points)) {
+        if (iOS_SizeIsValid(points.width, points.height)) {
             *outSize = points;
             gSanitizeFallbackSize = points;
             return YES;
@@ -188,7 +188,7 @@ static BOOL iOS_MeasureScreenSize(CGSize* outSize)
     if (mode.width > 0.0f && mode.height > 0.0f) {
         CGFloat scale = screen.scale > 0.0f ? screen.scale : 1.0f;
         CGSize points = CGSizeMake(mode.width / scale, mode.height / scale);
-        if (iOS_SizeIsValid(points)) {
+        if (iOS_SizeIsValid(points.width, points.height)) {
             *outSize = points;
             gSanitizeFallbackSize = points;
             return YES;
@@ -207,7 +207,7 @@ static BOOL iOS_MeasureScreenSize(CGSize* outSize)
     if (best.width > 0.0f && best.height > 0.0f) {
         CGFloat scale = screen.scale > 0.0f ? screen.scale : 1.0f;
         CGSize points = CGSizeMake(best.width / scale, best.height / scale);
-        if (iOS_SizeIsValid(points)) {
+        if (iOS_SizeIsValid(points.width, points.height)) {
             *outSize = points;
             gSanitizeFallbackSize = points;
             return YES;
@@ -225,15 +225,15 @@ static BOOL iOS_MeasureScreenSize(CGSize* outSize)
 }
 
 /// Prefer UIKit when it reports a sane size; otherwise use 1024x768.
-static CGSize iOS_GetReliableScreenSize(void)
+static void iOS_GetReliableScreenSize(CGSize* outSize)
 {
     CGSize size = iOS_GetDefaultScreenSize();
-    if (iOS_MeasureScreenSize(&size) && iOS_SizeIsValid(size))
+    if (iOS_MeasureScreenSize(&size) && iOS_SizeIsValid(size.width, size.height))
         iOS_EnsureLandscape(&size);
     else
         size = iOS_GetDefaultScreenSize();
     gSanitizeFallbackSize = size;
-    return size;
+    *outSize = size;
 }
 
 /// Block until UIApplicationStateActive (or timeout).
@@ -277,16 +277,16 @@ static UIWindow* iOS_GetSDLUIWindow(SDL_Window* window)
 static UIWindow* iOS_FindActiveWindow(SDL_Window* sdlWindow)
 {
     UIWindow* win = iOS_GetSDLUIWindow(sdlWindow);
-    if (win && iOS_SizeIsValid(win.bounds.size))
+    if (win && iOS_SizeIsValid(win.bounds.size.width, win.bounds.size.height))
         return win;
 
     win = [UIApplication sharedApplication].keyWindow;
-    if (win && iOS_SizeIsValid(win.bounds.size))
+    if (win && iOS_SizeIsValid(win.bounds.size.width, win.bounds.size.height))
         return win;
 
     NSArray<UIWindow*>* wins = [UIApplication sharedApplication].windows;
     for (UIWindow* w in wins) {
-        if (iOS_SizeIsValid(w.bounds.size))
+        if (iOS_SizeIsValid(w.bounds.size.width, w.bounds.size.height))
             return w;
     }
 
@@ -310,8 +310,8 @@ static SDL_Window* iOS_TryCreateWindowFromUIKit(void)
     for (int i = 0; i < 100 && !iOS_MeasureScreenSize(&size); i++)
         iOS_PumpRunLoopMs(50);
 
-    if (!iOS_SizeIsValid(size))
-        size = iOS_GetReliableScreenSize();
+    if (!iOS_SizeIsValid(size.width, size.height))
+        iOS_GetReliableScreenSize(&size);
 
     // Landscape game — prefer the larger axis as width.
     iOS_EnsureLandscape(&size);
@@ -330,7 +330,7 @@ static SDL_Window* iOS_TryCreateWindowFromUIKit(void)
 
     char dbg[160];
     char szBuf[48];
-    iOS_LogSize(szBuf, sizeof(szBuf), "frame", frame.size);
+    iOS_LogSize(szBuf, sizeof(szBuf), "frame", frame.size.width, frame.size.height);
     snprintf(dbg, sizeof(dbg), "CreateWindowFrom %s winBounds=%.0fx%.0f",
         szBuf, uiWindow.bounds.size.width, uiWindow.bounds.size.height);
     iOS_WriteLog("CREATEFROM", dbg);
@@ -351,17 +351,17 @@ static BOOL iOS_SyncWindowToScreen(SDL_Window* sdlWindow, UIWindow* uiWindow)
 
     UIScreen* screen = [UIScreen mainScreen];
     CGRect target = screen.bounds;
-    if (!iOS_SizeIsValid(target.size))
+    if (!iOS_SizeIsValid(target.size.width, target.size.height))
         target = CGRectMake(0, 0, screenSize.width, screenSize.height);
 
     if (uiWindow) {
-        if (!iOS_SizeIsValid(uiWindow.bounds.size))
+        if (!iOS_SizeIsValid(uiWindow.bounds.size.width, uiWindow.bounds.size.height))
             uiWindow.frame = target;
         [uiWindow makeKeyAndVisible];
         [uiWindow layoutIfNeeded];
 
         UIView* rootView = uiWindow.rootViewController.view;
-        if (rootView && !iOS_SizeIsValid(rootView.bounds.size)) {
+        if (rootView && !iOS_SizeIsValid(rootView.bounds.size.width, rootView.bounds.size.height)) {
             rootView.frame = uiWindow.bounds;
             [rootView setNeedsLayout];
             [rootView layoutIfNeeded];
@@ -371,14 +371,14 @@ static BOOL iOS_SyncWindowToScreen(SDL_Window* sdlWindow, UIWindow* uiWindow)
     if (sdlWindow) {
         int w = (int)target.size.width;
         int h = (int)target.size.height;
-        if (uiWindow && iOS_SizeIsValid(uiWindow.bounds.size)) {
+        if (uiWindow && iOS_SizeIsValid(uiWindow.bounds.size.width, uiWindow.bounds.size.height)) {
             w = (int)uiWindow.bounds.size.width;
             h = (int)uiWindow.bounds.size.height;
         }
         SDL_SetWindowSize(sdlWindow, w, h);
     }
 
-    return uiWindow ? iOS_SizeIsValid(uiWindow.bounds.size) : iOS_SizeIsValid(target.size);
+    return uiWindow ? iOS_SizeIsValid(uiWindow.bounds.size.width, uiWindow.bounds.size.height) : iOS_SizeIsValid(target.size.width, target.size.height);
 }
 
 /// Pump the main run loop until the SDL window has non-zero bounds.
@@ -390,13 +390,13 @@ static BOOL iOS_WaitForWindowLayout(SDL_Window* sdlWindow, int maxWaitMs)
     while (waited < maxWaitMs) {
         @autoreleasepool {
             UIWindow* uiWindow = iOS_FindActiveWindow(sdlWindow);
-            if (uiWindow && iOS_SizeIsValid(uiWindow.bounds.size))
+            if (uiWindow && iOS_SizeIsValid(uiWindow.bounds.size.width, uiWindow.bounds.size.height))
                 return YES;
 
             if (iOS_SyncWindowToScreen(sdlWindow, uiWindow)) {
                 iOS_PumpRunLoopMs(stepMs);
                 uiWindow = iOS_FindActiveWindow(sdlWindow);
-                if (uiWindow && iOS_SizeIsValid(uiWindow.bounds.size))
+                if (uiWindow && iOS_SizeIsValid(uiWindow.bounds.size.width, uiWindow.bounds.size.height))
                     return YES;
             }
         }
@@ -593,10 +593,11 @@ extern "C" bool iOS_GetDrawableSize(SDL_Window* window, int* outW, int* outH)
     }
 
     // Priority 3: Screen size fallback (points, not pixels).
-    const CGSize fb = iOS_GetReliableScreenSize();
+    CGSize fb;
+    iOS_GetReliableScreenSize(&fb);
     if (outW) *outW = (int)fb.width;
     if (outH) *outH = (int)fb.height;
-    return iOS_SizeIsValid(fb);
+    return iOS_SizeIsValid(fb.width, fb.height);
 }
 
 /// Safe wrapper around SDL_CreateWindow for iOS.
@@ -626,17 +627,17 @@ static BOOL iOS_FixNaNPoint(CGPoint* p)
 static void iOS_FixNaNRect(CGRect* r)
 {
     CGSize fb = gSanitizeFallbackSize;
-    if (!iOS_SizeIsValid(fb))
+    if (!iOS_SizeIsValid(fb.width, fb.height))
         iOS_MeasureScreenSize(&fb);
 
     if (isnan(r->origin.x) || isinf(r->origin.x)) r->origin.x = 0;
     if (isnan(r->origin.y) || isinf(r->origin.y)) r->origin.y = 0;
 
     if (isnan(r->size.width) || isinf(r->size.width) || r->size.width <= 0.0f) {
-        if (iOS_SizeIsValid(fb)) r->size.width = fb.width;
+        if (iOS_SizeIsValid(fb.width, fb.height)) r->size.width = fb.width;
     }
     if (isnan(r->size.height) || isinf(r->size.height) || r->size.height <= 0.0f) {
-        if (iOS_SizeIsValid(fb)) r->size.height = fb.height;
+        if (iOS_SizeIsValid(fb.width, fb.height)) r->size.height = fb.height;
     }
 
     // If one axis is still bad, mirror the valid axis (square fallback).
@@ -646,13 +647,21 @@ static void iOS_FixNaNRect(CGRect* r)
         r->size.height = r->size.width;
 }
 
-static void (*gOrigSetPosition)(id, SEL, CGPoint);
-static void (*gOrigLayerSetFrame)(id, SEL, CGRect);
-static void (*gOrigLayerSetBounds)(id, SEL, CGRect);
-static void (*gOrigViewSetFrame)(id, SEL, CGRect);
-static void (*gOrigViewSetBounds)(id, SEL, CGRect);
-static CGRect (*gOrigViewGetFrame)(id, SEL);
-static CGRect (*gOrigViewGetBounds)(id, SEL);
+#if defined(__arm__) && !defined(__LP64__)
+#define STRET_SIGNATURE 1
+#else
+#define STRET_SIGNATURE 0
+#endif
+
+static void (*gOrigSetPosition)(id, SEL, CGPoint) = nullptr;
+static void (*gOrigLayerSetFrame)(id, SEL, CGRect) = nullptr;
+static void (*gOrigLayerSetBounds)(id, SEL, CGRect) = nullptr;
+static void (*gOrigViewSetFrame)(id, SEL, CGRect) = nullptr;
+static void (*gOrigViewSetBounds)(id, SEL, CGRect) = nullptr;
+static IMP gOrigViewGetFrame = nil;
+static IMP gOrigViewGetBounds = nil;
+static IMP gOrigLayerGetBounds = nil;
+static IMP gOrigLayerGetFrame = nil;
 
 static void iOS_SwizzledSetPosition(id self, SEL _cmd, CGPoint position)
 {
@@ -684,10 +693,56 @@ static void iOS_SwizzledViewSetBounds(id self, SEL _cmd, CGRect bounds)
     gOrigViewSetBounds(self, _cmd, bounds);
 }
 
+#if STRET_SIGNATURE
+typedef void (*ViewGetFrame_IMP)(CGRect* rect, id self, SEL _cmd);
+static void iOS_SwizzledViewGetFrame(CGRect* rect, id self, SEL _cmd)
+{
+    ((ViewGetFrame_IMP)gOrigViewGetFrame)(rect, self, _cmd);
+    if ([self isKindOfClass:[UIWindow class]] && !iOS_SizeIsValid(rect->size.width, rect->size.height)) {
+        const CGRect fb = iOS_GetDefaultFrame();
+        *rect = CGRectMake(rect->origin.x, rect->origin.y, fb.size.width, fb.size.height);
+    }
+}
+
+typedef void (*ViewGetBounds_IMP)(CGRect* rect, id self, SEL _cmd);
+static void iOS_SwizzledViewGetBounds(CGRect* rect, id self, SEL _cmd)
+{
+    ((ViewGetBounds_IMP)gOrigViewGetBounds)(rect, self, _cmd);
+    if ([self isKindOfClass:[UIWindow class]] && !iOS_SizeIsValid(rect->size.width, rect->size.height)) {
+        *rect = iOS_GetDefaultFrame();
+    }
+}
+
+typedef void (*LayerGetBounds_IMP)(CGRect* rect, id self, SEL _cmd);
+static void iOS_SwizzledLayerGetBounds(CGRect* rect, id self, SEL _cmd)
+{
+    ((LayerGetBounds_IMP)gOrigLayerGetBounds)(rect, self, _cmd);
+    if (!iOS_SizeIsValid(rect->size.width, rect->size.height) || std::isnan(rect->origin.x)) {
+        if (gForcedDrawableSize.width > 0 && gForcedDrawableSize.height > 0) {
+            *rect = CGRectMake(0, 0, gForcedDrawableSize.width, gForcedDrawableSize.height);
+        } else {
+            *rect = iOS_GetDefaultFrame();
+        }
+    }
+}
+
+typedef void (*LayerGetFrame_IMP)(CGRect* rect, id self, SEL _cmd);
+static void iOS_SwizzledLayerGetFrame(CGRect* rect, id self, SEL _cmd)
+{
+    ((LayerGetFrame_IMP)gOrigLayerGetFrame)(rect, self, _cmd);
+    if (!iOS_SizeIsValid(rect->size.width, rect->size.height) || std::isnan(rect->origin.x)) {
+        if (gForcedDrawableSize.width > 0 && gForcedDrawableSize.height > 0) {
+            *rect = CGRectMake(0, 0, gForcedDrawableSize.width, gForcedDrawableSize.height);
+        } else {
+            *rect = iOS_GetDefaultFrame();
+        }
+    }
+}
+#else
 static CGRect iOS_SwizzledViewGetFrame(id self, SEL _cmd)
 {
-    CGRect orig = gOrigViewGetFrame(self, _cmd);
-    if ([self isKindOfClass:[UIWindow class]] && !iOS_SizeIsValid(orig.size)) {
+    CGRect orig = ((CGRect (*)(id, SEL))gOrigViewGetFrame)(self, _cmd);
+    if ([self isKindOfClass:[UIWindow class]] && !iOS_SizeIsValid(orig.size.width, orig.size.height)) {
         const CGRect fb = iOS_GetDefaultFrame();
         return CGRectMake(orig.origin.x, orig.origin.y, fb.size.width, fb.size.height);
     }
@@ -696,23 +751,17 @@ static CGRect iOS_SwizzledViewGetFrame(id self, SEL _cmd)
 
 static CGRect iOS_SwizzledViewGetBounds(id self, SEL _cmd)
 {
-    CGRect orig = gOrigViewGetBounds(self, _cmd);
-    if ([self isKindOfClass:[UIWindow class]] && !iOS_SizeIsValid(orig.size)) {
+    CGRect orig = ((CGRect (*)(id, SEL))gOrigViewGetBounds)(self, _cmd);
+    if ([self isKindOfClass:[UIWindow class]] && !iOS_SizeIsValid(orig.size.width, orig.size.height)) {
         return iOS_GetDefaultFrame();
     }
     return orig;
 }
 
-// CALayer getter swizzles — intercept reads on ALL layers so
-// CoreAnimation always sees valid geometry even if UIKit bypassed
-// the setter and wrote NaN directly to the ivars.
-static CGRect (*gOrigLayerGetBounds)(id, SEL);
-static CGRect (*gOrigLayerGetFrame)(id, SEL);
-
 static CGRect iOS_SwizzledLayerGetBounds(id self, SEL _cmd)
 {
-    CGRect orig = gOrigLayerGetBounds(self, _cmd);
-    if (!iOS_SizeIsValid(orig.size) || isnan(orig.origin.x)) {
+    CGRect orig = ((CGRect (*)(id, SEL))gOrigLayerGetBounds)(self, _cmd);
+    if (!iOS_SizeIsValid(orig.size.width, orig.size.height) || std::isnan(orig.origin.x)) {
         if (gForcedDrawableSize.width > 0 && gForcedDrawableSize.height > 0) {
             return CGRectMake(0, 0, gForcedDrawableSize.width, gForcedDrawableSize.height);
         }
@@ -723,8 +772,8 @@ static CGRect iOS_SwizzledLayerGetBounds(id self, SEL _cmd)
 
 static CGRect iOS_SwizzledLayerGetFrame(id self, SEL _cmd)
 {
-    CGRect orig = gOrigLayerGetFrame(self, _cmd);
-    if (!iOS_SizeIsValid(orig.size) || isnan(orig.origin.x)) {
+    CGRect orig = ((CGRect (*)(id, SEL))gOrigLayerGetFrame)(self, _cmd);
+    if (!iOS_SizeIsValid(orig.size.width, orig.size.height) || std::isnan(orig.origin.x)) {
         if (gForcedDrawableSize.width > 0 && gForcedDrawableSize.height > 0) {
             return CGRectMake(0, 0, gForcedDrawableSize.width, gForcedDrawableSize.height);
         }
@@ -732,6 +781,7 @@ static CGRect iOS_SwizzledLayerGetFrame(id self, SEL _cmd)
     }
     return orig;
 }
+#endif
 
 static BOOL gSwizzleActive = NO;
 
@@ -740,17 +790,29 @@ static BOOL gSwizzleActive = NO;
 // so that SDL (and any UIKit code) always sees valid geometry.
 // ---------------------------------------------------------------------------
 
-static CGRect (*gOrigUIScreenBounds)(id, SEL);
+static IMP gOrigUIScreenBounds = nil;
 
+#if STRET_SIGNATURE
+typedef void (*UIScreenBounds_IMP)(CGRect* rect, id self, SEL _cmd);
+static void iOS_SwizzledUIScreenBounds(CGRect* rect, id self, SEL _cmd)
+{
+    ((UIScreenBounds_IMP)gOrigUIScreenBounds)(rect, self, _cmd);
+    if (rect->size.width <= 0.0f || rect->size.height <= 0.0f ||
+        std::isnan(rect->size.width) || std::isnan(rect->size.height)) {
+        *rect = CGRectMake(0, 0, 1024, 768);
+    }
+}
+#else
 static CGRect iOS_SwizzledUIScreenBounds(id self, SEL _cmd)
 {
-    CGRect orig = gOrigUIScreenBounds(self, _cmd);
+    CGRect orig = ((CGRect (*)(id, SEL))gOrigUIScreenBounds)(self, _cmd);
     if (orig.size.width <= 0.0f || orig.size.height <= 0.0f ||
-        isnan(orig.size.width) || isnan(orig.size.height)) {
+        std::isnan(orig.size.width) || std::isnan(orig.size.height)) {
         return CGRectMake(0, 0, 1024, 768);
     }
     return orig;
 }
+#endif
 
 static void iOS_SwizzleUIScreenBounds(void)
 {
@@ -759,7 +821,7 @@ static void iOS_SwizzleUIScreenBounds(void)
     installed = YES;
 
     Method m = class_getInstanceMethod([UIScreen class], @selector(bounds));
-    gOrigUIScreenBounds = (CGRect (*)(id, SEL))method_getImplementation(m);
+    gOrigUIScreenBounds = method_getImplementation(m);
     method_setImplementation(m, (IMP)iOS_SwizzledUIScreenBounds);
 }
 
@@ -798,19 +860,19 @@ static void iOS_SwizzleSetPosition(void)
     method_setImplementation(m, (IMP)iOS_SwizzledViewSetBounds);
 
     m = class_getInstanceMethod([UIView class], @selector(frame));
-    gOrigViewGetFrame = (CGRect (*)(id, SEL))method_getImplementation(m);
+    gOrigViewGetFrame = method_getImplementation(m);
     method_setImplementation(m, (IMP)iOS_SwizzledViewGetFrame);
 
     m = class_getInstanceMethod([UIView class], @selector(bounds));
-    gOrigViewGetBounds = (CGRect (*)(id, SEL))method_getImplementation(m);
+    gOrigViewGetBounds = method_getImplementation(m);
     method_setImplementation(m, (IMP)iOS_SwizzledViewGetBounds);
 
     m = class_getInstanceMethod([CALayer class], @selector(bounds));
-    gOrigLayerGetBounds = (CGRect (*)(id, SEL))method_getImplementation(m);
+    gOrigLayerGetBounds = method_getImplementation(m);
     method_setImplementation(m, (IMP)iOS_SwizzledLayerGetBounds);
 
     m = class_getInstanceMethod([CALayer class], @selector(frame));
-    gOrigLayerGetFrame = (CGRect (*)(id, SEL))method_getImplementation(m);
+    gOrigLayerGetFrame = method_getImplementation(m);
     method_setImplementation(m, (IMP)iOS_SwizzledLayerGetFrame);
 }
 
@@ -840,6 +902,12 @@ static void iOS_UnswizzleSetPosition(void)
     m = class_getInstanceMethod([UIView class], @selector(bounds));
     method_setImplementation(m, (IMP)gOrigViewGetBounds);
 
+    m = class_getInstanceMethod([CALayer class], @selector(bounds));
+    method_setImplementation(m, (IMP)gOrigLayerGetBounds);
+
+    m = class_getInstanceMethod([CALayer class], @selector(frame));
+    method_setImplementation(m, (IMP)gOrigLayerGetFrame);
+
     gOrigSetPosition = nil;
     gOrigLayerSetFrame = nil;
     gOrigLayerSetBounds = nil;
@@ -847,6 +915,8 @@ static void iOS_UnswizzleSetPosition(void)
     gOrigViewSetBounds = nil;
     gOrigViewGetFrame = nil;
     gOrigViewGetBounds = nil;
+    gOrigLayerGetBounds = nil;
+    gOrigLayerGetFrame = nil;
 }
 
 extern "C" SDL_Window* iOS_CreateWindowSafe(
@@ -875,7 +945,7 @@ extern "C" SDL_Window* iOS_CreateWindowSafe(
             // frame and its CAEAGLLayer has non-zero dimensions.
             {
                 CGSize cz;
-                if (iOS_MeasureScreenSize(&cz) && iOS_SizeIsValid(cz)) {
+                if (iOS_MeasureScreenSize(&cz) && iOS_SizeIsValid(cz.width, cz.height)) {
                     w = (int)cz.width;
                     h = (int)cz.height;
                 }
@@ -898,10 +968,10 @@ extern "C" SDL_Window* iOS_CreateWindowSafe(
         // to work with, and the EAGL context can be created.
         if (result) {
             UIWindow* sdlUIWin = iOS_GetSDLUIWindow(result);
-            if (!sdlUIWin || !iOS_SizeIsValid(sdlUIWin.bounds.size) || !iOS_SizeIsValid(sdlUIWin.frame.size)) {
+            if (!sdlUIWin || !iOS_SizeIsValid(sdlUIWin.bounds.size.width, sdlUIWin.bounds.size.height) || !iOS_SizeIsValid(sdlUIWin.frame.size.width, sdlUIWin.frame.size.height)) {
                 CGSize fbSize;
                 iOS_MeasureScreenSize(&fbSize);
-                if (iOS_SizeIsValid(fbSize)) {
+                if (iOS_SizeIsValid(fbSize.width, fbSize.height)) {
                     // Landscape: ensure width > height
                     if (fbSize.width < fbSize.height) {
                         CGFloat t = fbSize.width;
@@ -936,19 +1006,19 @@ extern "C" SDL_Window* iOS_CreateWindowSafe(
         UIWindow* kw = iOS_FindActiveWindow(result);
         char dbg[256];
         char kwBuf[48], scrBuf[48];
-        iOS_LogSize(kwBuf, sizeof(kwBuf), "keyWin",
-            kw ? kw.bounds.size : CGSizeZero);
-        iOS_LogSize(scrBuf, sizeof(scrBuf), "screen",
-            [UIScreen mainScreen].bounds.size);
+        CGSize kwSz = kw ? kw.bounds.size : CGSizeZero;
+        iOS_LogSize(kwBuf, sizeof(kwBuf), "keyWin", kwSz.width, kwSz.height);
+        CGSize scrSz = [UIScreen mainScreen].bounds.size;
+        iOS_LogSize(scrBuf, sizeof(scrBuf), "screen", scrSz.width, scrSz.height);
         snprintf(dbg, sizeof(dbg), "win=%p %s %s", (void*)result, kwBuf, scrBuf);
         iOS_WriteLog("SDL_WINDOW_OK", dbg);
 
         const bool layoutReady = iOS_WaitForWindowLayout(result, 3000);
         kw = iOS_FindActiveWindow(result);
-        iOS_LogSize(kwBuf, sizeof(kwBuf), "keyWin",
-            kw ? kw.bounds.size : CGSizeZero);
-        iOS_LogSize(scrBuf, sizeof(scrBuf), "screen",
-            [UIScreen mainScreen].bounds.size);
+        CGSize kwSz2 = kw ? kw.bounds.size : CGSizeZero;
+        iOS_LogSize(kwBuf, sizeof(kwBuf), "keyWin", kwSz2.width, kwSz2.height);
+        CGSize scrSz2 = [UIScreen mainScreen].bounds.size;
+        iOS_LogSize(scrBuf, sizeof(scrBuf), "screen", scrSz2.width, scrSz2.height);
         snprintf(dbg, sizeof(dbg), "layout=%s win=%p %s %s",
             layoutReady ? "OK" : "TIMEOUT", (void*)result, kwBuf, scrBuf);
         iOS_WriteLog("SDL_WINDOW_LAYOUT", dbg);
@@ -1068,7 +1138,7 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
                 else if (orientVal == UIInterfaceOrientationPortraitUpsideDown) orStr = "PD";
 
                 char bndBuf[48], frmBuf[64], scrBuf[48];
-                iOS_LogSize(bndBuf, sizeof(bndBuf), "bounds", logWin.bounds.size);
+                iOS_LogSize(bndBuf, sizeof(bndBuf), "bounds", logWin.bounds.size.width, logWin.bounds.size.height);
                 if (isnan(logWin.frame.size.height)) {
                     snprintf(frmBuf, sizeof(frmBuf), "frame=(%.0f,%.0f,%.0f,nan)",
                         logWin.frame.origin.x, logWin.frame.origin.y, logWin.frame.size.width);
@@ -1077,8 +1147,8 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
                         logWin.frame.origin.x, logWin.frame.origin.y,
                         logWin.frame.size.width, logWin.frame.size.height);
                 }
-                iOS_LogSize(scrBuf, sizeof(scrBuf), "screen",
-                    [UIScreen mainScreen].bounds.size);
+                CGSize scrSz = [UIScreen mainScreen].bounds.size;
+                iOS_LogSize(scrBuf, sizeof(scrBuf), "screen", scrSz.width, scrSz.height);
 
                 snprintf(buf, sizeof(buf), "GL %s %s %s or=%s",
                     bndBuf, frmBuf, scrBuf, orStr);
@@ -1093,7 +1163,7 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
         // ------------------------------------------------------------------
         CGSize fb;
         iOS_MeasureScreenSize(&fb);
-        if (!iOS_SizeIsValid(fb))
+        if (!iOS_SizeIsValid(fb.width, fb.height))
             fb = CGSizeMake(1024, 768);
         if (fb.width < fb.height) {
             CGFloat t = fb.width; fb.width = fb.height; fb.height = t;
@@ -1101,13 +1171,13 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
         const CGRect fbFrame = CGRectMake(0, 0, fb.width, fb.height);
 
         for (UIWindow* win in [UIApplication sharedApplication].windows) {
-            if (!iOS_SizeIsValid(win.bounds.size) || !iOS_SizeIsValid(win.frame.size)) {
+            if (!iOS_SizeIsValid(win.bounds.size.width, win.bounds.size.height) || !iOS_SizeIsValid(win.frame.size.width, win.frame.size.height)) {
                 win.frame = fbFrame;
                 [win makeKeyAndVisible];
                 [win layoutIfNeeded];
             }
             UIView* rv = win.rootViewController.view;
-            if (rv && (!iOS_SizeIsValid(rv.bounds.size) || !iOS_SizeIsValid(rv.frame.size))) {
+            if (rv && (!iOS_SizeIsValid(rv.bounds.size.width, rv.bounds.size.height) || !iOS_SizeIsValid(rv.frame.size.width, rv.frame.size.height))) {
                 rv.frame = fbFrame;
                 [rv setNeedsLayout];
                 [rv layoutIfNeeded];
@@ -1232,10 +1302,10 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
             // (renderbufferStorage uses bounds * contentsScale).
 
             char lb[64];
-            iOS_LogSize(lb, sizeof(lb), "layerBnd", eaglLayer.bounds.size);
+            iOS_LogSize(lb, sizeof(lb), "layerBnd", eaglLayer.bounds.size.width, eaglLayer.bounds.size.height);
             iOS_WriteLog("LAYER_BEFORE", lb);
 
-            for (int wi = 0; wi < 10 && !iOS_SizeIsValid(eaglLayer.bounds.size); wi++) {
+            for (int wi = 0; wi < 10 && !iOS_SizeIsValid(eaglLayer.bounds.size.width, eaglLayer.bounds.size.height); wi++) {
                 iOS_PumpRunLoopMs(50);
                 // Re-apply bounds in points if they got reset
                 [CATransaction begin];
@@ -1244,15 +1314,15 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
                 [CATransaction commit];
             }
 
-            iOS_LogSize(lb, sizeof(lb), "layerBnd", eaglLayer.bounds.size);
+            iOS_LogSize(lb, sizeof(lb), "layerBnd", eaglLayer.bounds.size.width, eaglLayer.bounds.size.height);
             iOS_WriteLog("LAYER_AFTER", lb);
 
             // If still 0x0, force it directly on the model layer (in points)
-            if (!iOS_SizeIsValid(eaglLayer.bounds.size)) {
+            if (!iOS_SizeIsValid(eaglLayer.bounds.size.width, eaglLayer.bounds.size.height)) {
                 eaglLayer.bounds = CGRectMake(0, 0, fb.width, fb.height);
                 [CATransaction flush];
                 iOS_PumpRunLoopMs(50);
-                iOS_LogSize(lb, sizeof(lb), "layerBnd_force", eaglLayer.bounds.size);
+                iOS_LogSize(lb, sizeof(lb), "layerBnd_force", eaglLayer.bounds.size.width, eaglLayer.bounds.size.height);
                 iOS_WriteLog("LAYER_FORCE", lb);
             }
         }
@@ -1263,10 +1333,10 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
         // ------------------------------------------------------------------
         SDL_GLContext ctx = nullptr;
         const bool layerReady = eaglLayer &&
-            (iOS_SizeIsValid(eaglLayer.bounds.size) || iOS_SizeIsValid(fb));
+            (iOS_SizeIsValid(eaglLayer.bounds.size.width, eaglLayer.bounds.size.height) || iOS_SizeIsValid(fb.width, fb.height));
         if (layerReady) {
             char lb[64];
-            iOS_LogSize(lb, sizeof(lb), "layerBnd_final", eaglLayer.bounds.size);
+            iOS_LogSize(lb, sizeof(lb), "layerBnd_final", eaglLayer.bounds.size.width, eaglLayer.bounds.size.height);
             iOS_WriteLog("LAYER_FINAL", lb);
 
             ctx = SDL_GL_CreateContext(window);
