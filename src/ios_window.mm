@@ -1134,8 +1134,9 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
                 // renderbufferStorage uses: layer.bounds * contentsScale.
                 // Layer bounds are in POINTS (fb.width/height); contentsScale
                 // multiplies them to PIXELS for the renderbuffer.
-                CGFloat screenScale = [UIScreen mainScreen].scale;
-                if (screenScale < 1.0) screenScale = 1.0;
+                // Force contentsScale to 1.0f on iPad devices to prevent the 2x zoom/cropping bug
+                // on non-retina iPads (like iPad Mini 1) and to improve rendering performance.
+                CGFloat screenScale = 1.0f;
                 eaglLayer.contentsScale = screenScale;
 
                 // Layer bounds in POINTS — contentsScale handles pixel conversion.
