@@ -96,7 +96,11 @@ static void iOS_LogSize(char* buf, size_t bufSize, const char* label, CGFloat wi
     if (std::isnan(width) || std::isnan(height)) {
         snprintf(buf, bufSize, "%s=nan", label);
     } else {
-        snprintf(buf, bufSize, "%s=%.0fx%.0f", label, (double)width, (double)height);
+        uint32_t w_bits = 0;
+        uint32_t h_bits = 0;
+        std::memcpy(&w_bits, &width, 4);
+        std::memcpy(&h_bits, &height, 4);
+        snprintf(buf, bufSize, "%s=%.0fx%.0f (raw: 0x%08x, 0x%08x)", label, (double)width, (double)height, w_bits, h_bits);
     }
 }
 
