@@ -1106,6 +1106,7 @@ static UIView* iOS_FindEAGLViewRecursive(UIView* view)
 extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
 {
     @try {
+        /*
         // Try direct SDL creation first
         SDL_GLContext directCtx = SDL_GL_CreateContext(window);
         if (directCtx) {
@@ -1132,6 +1133,7 @@ extern "C" SDL_GLContext iOS_CreateGLContextSafe(SDL_Window* window)
             }
             return directCtx;
         }
+        */
         // Ensure swizzle is active
         if (!gSwizzleActive)
             iOS_SwizzleSetPosition();
